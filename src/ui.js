@@ -498,7 +498,8 @@ function renderP2() {
   <div class="card"><div class="card-h"><h2>Kapital je ETF-Sparplan</h2><span class="muted" id="funds-sub"></span></div><div class="chart" id="ch-funds" role="img" aria-label="Kapital je ETF-Sparplan"></div></div>
   <div class="card"><div class="card-h"><h2>Altersvorsorgedepot</h2><span class="muted" id="avd-sub"></span></div><div class="chart" id="ch-avd" role="img" aria-label="Kapital und Auszahlungen im Altersvorsorgedepot"></div></div>
   <div class="grid">
-    <div class="card"><h2>Sparen pro Jahr</h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div></div>
+    <div class="card"><h2>Sparen pro Jahr</h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div>
+      <p class="note"><b>Annahme:</b> Die Steuer auf Ausschüttungen und Vorabpauschale des ETF-Depots wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a) fließen zusätzlich ins ETF-Depot.</p></div>
     <div class="card"><h2>Einkommen im Ruhestand pro Monat</h2><div class="chart sm" id="ch-income" role="img" aria-label="Einkommen im Ruhestand"></div></div>
   </div>
   <div class="grid">
@@ -654,6 +655,7 @@ function renderCharts() {
   const sr = sim.rows.filter(r => r.saveMonths > 0);
   chartOf('ch-save').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: sr.map(r => r.saveMonths < 12 ? `${r.year} (${r.saveMonths} Mon.)` : r.year) },
+    tooltip: { ...baseOpt().tooltip, formatter: ps => `<b>${ps[0].axisValue}</b><br>` + ps.map(p => `${p.marker} ${p.seriesName}: <b>${eur(p.value)}</b>`).join('<br>') + `<br>Summe: <b>${eur(ps.reduce((a, p) => a + p.value, 0))}</b>` },
     series: [
       bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), CA),
       bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), C7),
