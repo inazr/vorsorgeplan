@@ -40,7 +40,7 @@ function activeFundIndex(d, year) {
 }
 
 // Ein Jahr Marktentwicklung + Sparrate + Ausschüttung + Vorabpauschale.
-// contrib wird gleichmäßig über das Jahr investiert (Kauf zum Halbjahreskurs).
+// contrib wird zum mittleren Kaufzeitpunkt opts.buyT (Jahresbruchteil, 0,5 = gleichmäßig übers Jahr) investiert.
 // Liefert steuerrelevante Beträge (vor Teilfreistellung und Pauschbetrag).
 function depotYear(d, year, R, contrib, basiszins, opts) {
   const out = { dist: 0, distTaxable: 0, vp: 0, vpTaxable: 0, contrib: 0 };
@@ -54,7 +54,8 @@ function depotYear(d, year, R, contrib, basiszins, opts) {
     // Kauf in diesem Jahr
     let newLot = null;
     if (i === act && contrib > 0) {
-      const pMid = p0 * Math.sqrt(Math.max(0.01, 1 + g));
+      const buyT = opts.buyT ?? 0.5;
+      const pMid = p0 * Math.pow(Math.max(0.01, 1 + g), buyT);
       newLot = { y: year, units: contrib / pMid, cost: contrib, vp: 0 };
       f.lots.push(newLot); f.lastY = year; f.totalIn += contrib; out.contrib += contrib;
     }
@@ -63,8 +64,8 @@ function depotYear(d, year, R, contrib, basiszins, opts) {
     const D = f.type === 'dist' ? p0 * f.divY : 0;        // Ausschüttung je Anteil
     const p1 = Math.max(0.0001, pPre - D);
     f.price = p1;
-    // Ausschüttung auf Bestand zu Jahresbeginn + anteilig neue Tranche (halbes Jahr)
-    const unitsForDist = unitsStart + (newLot ? newLot.units * 0.5 : 0);
+    // Ausschüttung auf Bestand zu Jahresbeginn + neue Tranche anteilig nach Haltedauer
+    const unitsForDist = unitsStart + (newLot ? newLot.units * (1 - (opts.buyT ?? 0.5)) : 0);
     const distTotal = D * unitsForDist;
     if (distTotal > 0) { out.dist += distTotal; out.distTaxable += distTotal * (1 - f.tf); reinvest += distTotal; }
     // Vorabpauschale je Anteil: Basisertrag gedeckelt durch Wertsteigerung + Ausschüttung, minus Ausschüttung
@@ -141,11 +142,11 @@ function zulageGrund(c, P) {
   return P.g1 * Math.min(c, P.g1Cap) + P.g2 * Math.max(0, Math.min(c, P.fMax) - P.g1Cap);
 }
 
-// Jahr der Ansparphase: Beiträge Mitte des Jahres, Zulage am Jahresende
-function avdSaveYear(a, R, cost, cF, cU, zul) {
-  const g = R - cost;
-  a.fv = a.fv * (1 + g) + cF * Math.sqrt(Math.max(0.01, 1 + g)) + zul;
-  a.uv = a.uv * (1 + g) + cU * Math.sqrt(Math.max(0.01, 1 + g));
+// Jahr der Ansparphase: Beiträge zum mittleren Zeitpunkt buyT (Jahresbruchteil), Zulage am Jahresende
+function avdSaveYear(a, R, cost, cF, cU, zul, buyT = 0.5) {
+  const g = R - cost, gc = Math.pow(Math.max(0.01, 1 + g), 1 - buyT);
+  a.fv = a.fv * (1 + g) + cF * gc + zul;
+  a.uv = a.uv * (1 + g) + cU * gc;
   a.uCost += cU; a.contribF += cF; a.zulagen += zul;
 }
 function avdGrow(a, R, cost) { const g = R - cost; a.fv *= (1 + g); a.uv *= (1 + g); }

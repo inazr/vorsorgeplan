@@ -82,9 +82,17 @@ function kapTax(kapTaxable, lossCarry, L, zvEOther, nKids, A) {
 
 // ─── Personen-Helfer ───
 function retireStartAbs(P) { return (P.by + P.retireAge) * 12 + (P.bm - 1) + 1; } // Monat nach Geburtstag
-function monthsRetired(P, year) {
-  const s = retireStartAbs(P), y0 = year * 12, y1 = year * 12 + 11;
-  return Math.max(0, Math.min(12, y1 - Math.max(s, y0) + 1));
+function monthsRetired(P, year) { return monthsIn(year, retireStartAbs(P), Infinity); }
+// Anzahl der Monate des Jahres im Zeitraum [from, to) (absolute Monate: Jahr * 12 + Monat − 1)
+function monthsIn(year, from, to) { return Math.max(0, Math.min(year * 12 + 12, to) - Math.max(year * 12, from)); }
+function avdPayStartAbs(P) { return (P.by + P.avd.payStart) * 12 + P.bm; } // Monat nach Geburtstag
+// Monate mit Kind bis einschließlich Geburtstagsmonat zum Alter untilAge
+function kidMonths(c, year, untilAge) { const b = c.by * 12 + (c.bm ?? 1) - 1; return monthsIn(year, b, b + untilAge * 12 + 1); }
+// Mittlerer Kaufzeitpunkt (Jahresbruchteil) und Zwölftelung der Vorabpauschale für Zahlungen [Betrag, Monat von, Monat bis)
+function buyTiming(parts) {
+  let s = 0, t = 0, v = 0;
+  for (const [amt, m0, m1] of parts) if (amt > 0) { s += amt; t += amt * (m0 + m1) / 24; v += amt * (25 - m0 - m1) / 24; }
+  return s > 0 ? { buyT: t / s, vpFracNew: v / s } : { buyT: 0.5, vpFracNew: 6.5 / 12 };
 }
 function zugangsfaktor(P) {
   const m = (P.retireAge - SV.rentenAlter) * 12;
@@ -120,9 +128,12 @@ function simulate(I, A, opt) {
   const firstRet = Math.min(...persons.map(retireStartAbs));
   const lastRet = Math.max(...persons.map(retireStartAbs));
   const saveEndAbs = I.saveUntil === 'last' ? lastRet : firstRet;   // Sparen bis (exkl.)
-  const wStartYear = Math.floor(lastRet / 12) + (lastRet % 12 === 0 ? 0 : 1); // erstes volles Jahr beide in Rente
+  const wStartAbs = lastRet;                                          // Entnahme ab dem Monat, in dem beide in Rente sind
+  const wStartYear = Math.floor(wStartAbs / 12);
+  const wFullYear = wStartYear + (wStartAbs % 12 === 0 ? 0 : 1);      // erstes volles Entnahmejahr
   const refP = persons[I.withdraw.refPerson ?? 0];
-  const endYear = refP.by + I.withdraw.targetAge;
+  const endAbs = (refP.by + I.withdraw.targetAge) * 12 + refP.bm;     // bis einschließlich Geburtstagsmonat zum Zielalter
+  const endYear = Math.floor((endAbs - 1) / 12);
 
   const depot = makeDepot({ funds: I.depot.funds, startValue: I.depot.startValue, startCost: I.depot.startCost, startYear: Y0 });
   const avd = persons.map(() => makeAVD());
@@ -145,11 +156,16 @@ function simulate(I, A, opt) {
     const mk = opt.path ? opt.path[t] : { R: A.ret, infl: A.inflation };
     if (t > 0) priceIdx *= 1 + (opt.path ? opt.path[t - 1].infl : A.inflation);
     const L = lawYear(year, A, priceIdx);
-    const kgKids = I.children.filter(c => year - c.by <= c.kgUntil);
-    const nKids = kgKids.length;
-    // PV: Abschlag 0,25 Pp. je Kind unter 25 ab dem 2. Kind (max. 4), Kinderlosenzuschlag ohne Kinder
-    const k25 = I.children.filter(c => year - c.by < 25).length;
-    const pvAb = 0.0025 * Math.min(4, Math.max(0, k25 - 1));
+    // Kindergeld und Kinderfreibetrag monatsweise (§ 32 Abs. 6 EStG: je Monat ein Zwölftel)
+    const kgM = I.children.map(c => kidMonths(c, year, c.kgUntil));
+    const kgKids = I.children.filter((c, k) => kgM[k] > 0);
+    const nKids = kgM.reduce((a, b) => a + b, 0) / 12;
+    // PV: Abschlag 0,25 Pp. je Kind unter 25 ab dem 2. Kind (max. 4), Monatsdurchschnitt; Kinderlosenzuschlag ohne Kinder
+    let pvAb = 0;
+    for (let m = 0; m < 12; m++) {
+      const k25 = I.children.filter(c => { const b = c.by * 12 + (c.bm ?? 1) - 1, a = year * 12 + m; return a >= b && a <= b + 25 * 12; }).length;
+      pvAb += 0.0025 * Math.min(4, Math.max(0, k25 - 1)) / 12;
+    }
     const childless = I.children.length === 0;
     const row = opt.detail ? { year, ages: persons.map(p => ageAt(p, year)), R: mk.R } : null;
 
@@ -193,38 +209,43 @@ function simulate(I, A, opt) {
 
     // ── Spar- oder Entnahmephase ──
     const yearAbs0 = year * 12;
-    const saveMonths = Math.max(0, Math.min(12, saveEndAbs - yearAbs0));
-    const inWithdraw = year >= wStartYear;
+    const saveMonths = monthsIn(year, 0, saveEndAbs);
+    const wMonths = monthsIn(year, wStartAbs, endAbs);   // Entnahmemonate im Jahr
+    const inWithdraw = wMonths > 0;
+    const inW = a => a >= wStartAbs && a < endAbs;
 
     // Budget und Kredit
-    let loanPay = 0, loanSonder = 0, loanPayoff = 0, loanInterest = 0;
+    let loanPay = 0, loanSonder = 0, loanPayoff = 0, loanInterest = 0, loanInSave = 0, loanInW = 0, payoffInW = 0;
     const payoffs = [];
     for (const l of loans) for (let m = 0; m < 12; m++) {
-      const o = loanMonth(l, yearAbs0 + m, false);
+      const a = yearAbs0 + m, o = loanMonth(l, a, false);
       loanPay += o.pay + o.sonder; loanSonder += o.sonder; loanPayoff += o.payoff; loanInterest += o.interest;
-      if (o.payoff > 0) payoffs.push({ l, amt: o.payoff });
+      if (a < saveEndAbs) loanInSave += o.pay + o.sonder;
+      if (inW(a)) { loanInW += o.pay + o.sonder; payoffInW += o.payoff; }
+      else if (o.payoff > 0) payoffs.push({ l, amt: o.payoff });
     }
+    const payoffOut = loanPayoff - payoffInW;   // Ablösung außerhalb der Entnahme: Verkauf aus dem Depot
     let debt = loans.reduce((a, l) => a + l.bal, 0);
     const budget = B.monthly * Math.pow(1 + B.dyn, t) * saveMonths;
-    const loanInSave = loanPay * saveMonths / 12;
     let sparBudget = Math.max(0, budget - loanInSave);
-    // Nach Sparende werden Kreditraten aus der Rente bezahlt (zählen als Ausgabe der Entnahme)
-    const loanAfterSave = loanPay - loanInSave;
+    // In der Entnahme werden Kreditraten aus der Rente bezahlt (zählen als Ausgabe der Entnahme)
 
     // ── Altersvorsorgedepot: Beiträge und Zulagen ──
-    const avdIn = persons.map(() => ({ cF: 0, cU: 0, zul: 0 }));
-    if (useAVD && year >= 2027 && saveMonths > 0) {
+    // Beiträge monatsweise bis Sparende, eigenem Rentenbeginn oder Auszahlungsbeginn
+    const avdIn = persons.map(() => ({ cF: 0, cU: 0, zul: 0, m: 0 }));
+    if (useAVD && year >= 2027) {
       persons.forEach((p, i) => {
         const cfg = p.avd; if (!cfg.on) return;
-        if (ageAt(p, year) >= 67) return;
-        const f = saveMonths / 12;
+        const m = monthsIn(year, 2027 * 12, Math.min(saveEndAbs, retireStartAbs(p), avdPayStartAbs(p)));
+        if (m <= 0) return;
+        const f = m / 12;
         const cF = Math.min(cfg.eigen, AVD.fMax) * f;
         const cU = Math.min(cfg.extra, AVD.einMax - Math.min(cfg.eigen, AVD.fMax)) * f;
         let zul = zulageGrund(cF, AVD);
         // Kinderzulage: 100 % der Beiträge, max. 300 € je zugeordnetem Kind mit Kindergeld
         const zk = kgKids.filter(c => (c.zulageTo ?? 1) === i).length;
         if (zk > 0 && cF >= AVD.minEigen) zul += Math.min(cF, AVD.kindMax * zk);
-        avdIn[i] = { cF, cU, zul };
+        avdIn[i] = { cF, cU, zul, m };
       });
     }
 
@@ -239,21 +260,27 @@ function simulate(I, A, opt) {
     const dedSum = avdIn.reduce((s, a) => s + a.cF + a.zul, 0);
 
     // ── Entnahme / laufende Rechnung ──
-    // AVD-Auszahlungen
+    // AVD-Auszahlungen ab dem Monat nach dem Geburtstag zum Auszahlungsbeginn, Restkapital / Restmonate
     const avdPay = persons.map((p, i) => {
-      if (!useAVD || !p.avd.on) return { gross: 0, taxable: 0 };
-      const age = ageAt(p, year);
+      const none = { gross: 0, taxable: 0, m: 0, mW: 0 };
+      if (!useAVD || !p.avd.on) return none;
       const a = avd[i];
-      if (age < p.avd.payStart || avdValue(a) <= 0) return { gross: 0, taxable: 0 };
+      const s0 = avdPayStartAbs(p), s1 = s0 + (p.avd.payEnd - p.avd.payStart + 1) * 12;
+      const m = monthsIn(year, s0, s1);
+      if (m <= 0 || avdValue(a) <= 0) return none;
       let res = { gross: 0, taxable: 0 };
       if (!a.paying) {
         a.paying = true;
         if (p.avd.teilkapital > 0) res = avdWithdraw(a, avdValue(a) * p.avd.teilkapital);
       }
-      const left = p.avd.payEnd - age + 1;
-      const r2 = avdWithdraw(a, left <= 1 ? avdValue(a) : avdValue(a) / left);
-      return { gross: res.gross + r2.gross, taxable: res.taxable + r2.taxable };
+      const left = s1 - Math.max(s0, yearAbs0);
+      const r2 = avdWithdraw(a, left <= m ? avdValue(a) : avdValue(a) * m / left);
+      return { gross: res.gross + r2.gross, taxable: res.taxable + r2.taxable, m, mW: monthsIn(year, Math.max(s0, wStartAbs), Math.min(s1, endAbs)) };
     });
+    // Anteile, die in die Entnahmemonate fallen (Renten und KV je Person, Einkommensteuer nach Einkommensanteil)
+    const kvShare = persons.map(p => { const mR = monthsRetired(p, year); return mR > 0 ? monthsIn(year, Math.max(retireStartAbs(p), wStartAbs), endAbs) / mR : 0; });
+    const grvW = grv.map((g, i) => g * kvShare[i]);
+    const avdW = avdPay.map(a => a.m > 0 ? a.gross * a.mW / a.m : 0);
 
     // Einkommen ohne Kapital
     const pensionPers = persons.map((p, i) => grv[i] > 0 || avdPay[i].gross > 0);
@@ -305,25 +332,30 @@ function simulate(I, A, opt) {
       const zvE = Math.max(0, otherIncome - vorsorge - kvR.deductible - LAW.pausch.sonderausg);
       const it = incomeTax(zvE, nKids, L);
       const kt = kapTax(kapT, depot.lossCarry, L, zvE, nKids, A);
+      // Steuer auf Vorabpauschale/Ausschüttungen des Vorjahres ist im Januar fällig, Steuer auf Verkäufe in der Entnahme
+      kt.taxW = !inWithdraw ? 0 : wStartAbs <= yearAbs0 ? kt.tax : Math.max(0, kt.tax - kapTax(pendingKap, depot.lossCarry, L, zvE, nKids, A).tax);
       return { sale, it, kt, kvR, zvE };
     }
 
     let G = 0, ev, extraInvest = 0, netIncome = 0, target = 0, shortfall = false;
-    const grossPens = grv.reduce((a, b) => a + b, 0) + avdPay.reduce((s, a) => s + a.gross, 0);
+    const sum = a => a.reduce((x, y) => x + y, 0);
+    const grossW = sum(grvW) + sum(avdW);
+    const incAll = sum(work.map(w => w.g)) + sum(grv) + sum(avdPay.map(a => a.gross));
+    const wT = !inWithdraw ? 0 : incAll > 0 ? grossW / incAll : 1;   // Anteil der Einkommensteuer, der auf die Entnahmemonate fällt
 
     // Hausablösung über ETF-Entnahme
     let houseG = 0;
-    if (loanPayoff > 0 && !inWithdraw) {
+    if (payoffOut > 0) {
       let lo = 0, hi = depotValue(depot);
-      for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; const e = evalYear(mid, true); const net = mid - e.kt.tax; if (net < loanPayoff) lo = mid; else hi = mid; }
+      for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; const e = evalYear(mid, true); const net = mid - e.kt.tax; if (net < payoffOut) lo = mid; else hi = mid; }
       houseG = hi;
     }
 
     if (inWithdraw) {
-      if (I.withdraw.strategy === 'realConst') target = opt.targetReal * 12 * priceIdx;
-      else if (I.withdraw.strategy === 'fixedNet') target = I.withdraw.fixedNet * 12 * (I.withdraw.fixedIndexed ? priceIdx : 1);
-      target += loanAfterSave + loanPayoff;   // Kreditrate nach Sparende und Ablösung aus dem Depot zusätzlich
-      const netOf = g => { const e = evalYear(g, true); return { net: grossPens + g - e.it.total - e.kt.tax - e.kvR.tot, e }; };
+      if (I.withdraw.strategy === 'realConst') target = opt.targetReal * wMonths * priceIdx;
+      else if (I.withdraw.strategy === 'fixedNet') target = I.withdraw.fixedNet * wMonths * (I.withdraw.fixedIndexed ? priceIdx : 1);
+      target += loanInW + payoffInW;   // Kreditraten und Ablösung in den Entnahmemonaten zusätzlich
+      const netOf = g => { const e = evalYear(g, true); return { net: grossW + g - e.it.total * wT - e.kt.taxW - sum(e.kvR.per.map((c, i) => c * kvShare[i])), e }; };
       const n0 = netOf(0);
       if (n0.net >= target) { G = 0; ev = n0.e; extraInvest = n0.net - target; netIncome = target; }
       else {
@@ -341,18 +373,18 @@ function simulate(I, A, opt) {
     }
 
     // Verkauf ausführen
-    const sellG = inWithdraw ? G : houseG;
+    const sellG = G + houseG;
     if (sellG > 0) depotSell(depot, sellG, I.depot.sellMode, false);
     depot.lossCarry = ev.kt.newLoss;
-    if (houseG > 0 || (loanPayoff > 0 && !inWithdraw)) {
+    if (payoffOut > 0) {
       // Reicht das Depot nicht, läuft der ungedeckte Rest als Anschlussfinanzierung weiter
       const covered = Math.max(0, houseG - ev.kt.tax);
-      const gap = loanPayoff - covered;
+      const gap = payoffOut - covered;
       if (gap > 1) for (const { l, amt } of payoffs) {
-        const rem = gap * amt / loanPayoff;
+        const rem = gap * amt / payoffOut;
         l.bal = rem; l.phase = 'post'; l.rM = loanRateM(l.c.zins); l.pay = annuityM(rem, l.rM, l.c.years * 12); l.postRate = l.pay;
       }
-      houseSale = { year, gross: houseG, tax: ev.kt.tax, payoff: loanPayoff, covered: Math.min(covered, loanPayoff) };
+      houseSale = { year, gross: houseG, tax: ev.kt.tax, payoff: payoffOut, covered: Math.min(covered, payoffOut) };
     }
     debt = loans.reduce((a, l) => a + l.bal, 0);
 
@@ -364,24 +396,19 @@ function simulate(I, A, opt) {
 
     // ── Sparphase: ETF-Sparrate ──
     const avdOut = avdIn.reduce((s, a) => s + a.cF + a.cU, 0);
-    let etfContrib = 0;
-    if (!inWithdraw) {
-      // Kapitalsteuern der Sparphase werden aus dem Sparbudget bezahlt
-      etfContrib = Math.max(0, sparBudget - avdOut - ev.kt.tax + pendingRefund);
-    } else {
-      etfContrib = extraInvest + pendingRefund;
-    }
+    // Kapitalsteuern werden in der Entnahme aus dem Netto, sonst aus dem Sparbudget bezahlt
+    const taxOutside = ev.kt.tax - ev.kt.taxW;
+    const taxFromBudget = Math.min(taxOutside, Math.max(0, sparBudget - avdOut + pendingRefund));
+    const savePart = Math.max(0, sparBudget - avdOut - taxOutside + pendingRefund);
+    // Altersvorsorge-Auszahlungen vor Entnahmestart werden reinvestiert (grobe Steuer/SV-Annahme 30 %)
+    const avdReinvest = (sum(avdPay.map(a => a.gross)) - sum(avdW)) * (1 - 0.3);
+    const etfContrib = savePart + extraInvest + avdReinvest;
     pendingRefund = refund;
     sumZulagen += zulSum; sumRefunds += refund; sumKapTax += ev.kt.tax;
 
-    // Nicht verbrauchte Altersvorsorge-Auszahlungen vor Entnahmestart werden reinvestiert
-    if (!inWithdraw && grossPens > 0 && saveMonths < 12) {
-      const avdNet = avdPay.reduce((s, a) => s + a.gross, 0);
-      if (avdNet > 0) etfContrib += avdNet * (1 - 0.3); // grobe Steuer/SV-Annahme für Übergangsjahre
-    }
-
     // ── Markt: ETF-Depot ──
-    const dy = depotYear(depot, year, mk.R, etfContrib, L.basiszins, { vpFracNew: 6.5 / 12 });
+    const wm0 = Math.max(0, wStartAbs - yearAbs0), wm1 = Math.min(12, endAbs - yearAbs0);
+    const dy = depotYear(depot, year, mk.R, etfContrib, L.basiszins, buyTiming([[savePart, 0, saveMonths || 12], [extraInvest, wm0, wm1], [avdReinvest, 0, 12]]));
     // Ausschüttungen brutto in aktiven Fonds (FIFO-Staffelung)
     if (dy.reinvestGross > 0) depotBuy(depot, I.depot.divRedirect ? dy.activeIdx : 0, dy.reinvestGross, year);
     pendingKap = dy.distTaxable + dy.vpTaxable;
@@ -391,8 +418,8 @@ function simulate(I, A, opt) {
     persons.forEach((p, i) => {
       if (!useAVD || !p.avd.on) return;
       const a = avd[i];
-      if (a.paying || avdIn[i].cF + avdIn[i].cU === 0) avdGrow(a, mk.R, p.avd.cost);
-      else avdSaveYear(a, mk.R, p.avd.cost, avdIn[i].cF, avdIn[i].cU, avdIn[i].zul);
+      if (avdIn[i].cF + avdIn[i].cU === 0) avdGrow(a, mk.R, p.avd.cost);
+      else avdSaveYear(a, mk.R, p.avd.cost, avdIn[i].cF, avdIn[i].cU, avdIn[i].zul, avdIn[i].m / 24);
     });
 
     const dv = depotValue(depot), av = avd.map(avdValue);
@@ -408,11 +435,11 @@ function simulate(I, A, opt) {
     const pp = persons.map((p, i) => {
       const estShare = taxBaseSum > 0 ? (ev.it.est + ev.it.soli) * taxBase[i] / taxBaseSum : (ev.it.est + ev.it.soli) / np;
       const kvI = ev.kvR.per[i];
-      const net = inWithdraw ? grv[i] + avdPay[i].gross + sellG / np - estShare - ev.kt.tax / np - kvI - extraInvest / np : 0;
+      const net = inWithdraw ? grvW[i] + avdW[i] + G / np - estShare * wT - ev.kt.taxW / np - kvI * kvShare[i] - extraInvest / np : 0;
       return {
-        etf: dv / np, avd: av[i], etfContrib: etfContrib / np, avdIn: avdIn[i].cF + avdIn[i].cU, zul: avdIn[i].zul,
+        etf: dv / np, avd: av[i], etfContrib: etfContrib / np, avdReinvest: avdReinvest / np, taxFromBudget: taxFromBudget / np, avdIn: avdIn[i].cF + avdIn[i].cU, zul: avdIn[i].zul,
         refund: dedSum > 0 ? refund * dedPer[i] / dedSum : 0, loanPay: loanPay / np, loanSonder: loanSonder / np, budget: budget / np, debt: debt / np, netWorth: (dv - debt) / np + av[i],
-        grv: grv[i], avdPay: avdPay[i].gross, etfSale: sellG / np,
+        grv: grv[i], avdPay: avdPay[i].gross, etfSale: sellG / np, grvW: grvW[i], avdPayW: avdW[i], estW: estShare * wT, kvW: kvI * kvShare[i], kapTaxW: ev.kt.taxW / np,
         est: estShare, kapTax: ev.kt.tax / np, kv: kvI, net, total: dv / np + av[i],
       };
     });
@@ -420,11 +447,12 @@ function simulate(I, A, opt) {
     if (inWithdraw && target > 0) minNetRatio = Math.min(minNetRatio, netIncome / target);
 
     if (row) Object.assign(row, {
-      phase: inWithdraw ? 'Entnahme' : (saveMonths > 0 ? 'Ansparen' : 'Übergang'),
+      phase: inWithdraw ? 'Entnahme' : (saveMonths > 0 ? 'Ansparen' : 'Übergang'), saveMonths, wMonths,
       priceIdx, etf: dv, etfCost: depotCost(depot), avd: av, total: dv + av.reduce((a, b) => a + b, 0),
-      etfContrib, avdIn: avdIn.map(a => a.cF + a.cU), zulagen: zulSum, refund, loanPay, loanSonder, loanInterest, budget,
+      etfContrib, avdReinvest, taxFromBudget, avdIn: avdIn.map(a => a.cF + a.cU), zulagen: zulSum, refund, loanPay, loanSonder, loanInterest, budget,
       debt, netWorth: dv + av.reduce((a, b) => a + b, 0) - debt,
       grv, grvTaxable, avdPay: avdPay.map(a => a.gross), etfSale: sellG, houseSale: houseG,
+      grvW, avdPayW: avdW, estW: (ev.it.est + ev.it.soli) * wT, kapTaxW: ev.kt.taxW, kvW: sum(ev.kvR.per.map((c, i) => c * kvShare[i])),
       zvE: ev.zvE, est: ev.it.est, soli: ev.it.soli, kapTax: ev.kt.tax, guenstiger: ev.kt.guenstiger,
       kv: ev.kvR.tot, vp: dy.vp, dist: dy.dist, net: inWithdraw ? netIncome : 0, target, shortfall,
       ep: [...ep], funds: depot.funds.map(fundValue), pp,
@@ -434,7 +462,7 @@ function simulate(I, A, opt) {
 
   const wRows = rows.filter(r => r.phase === 'Entnahme');
   return {
-    rows, depleted, depletedYear, wStartYear, endYear, minNetRatio,
+    rows, depleted, depletedYear, wStartYear, wFullYear, endYear, minNetRatio,
     final: depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0),
     kv, sumZulagen, sumRefunds, sumKapTax, sumVP, houseSale, loans,
     ep,
