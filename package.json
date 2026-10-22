@@ -1,0 +1,12 @@
+{
+  "name": "vorsorgeplan",
+  "version": "1.0.0",
+  "description": "Altersvorsorge-Rechner: Altersvorsorgedepot gegen ETF-Depot mit deutscher Steuer, Kranken- und Pflegeversicherung, Optimierer und Monte Carlo",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node test/run-tests.mjs"
+  },
+  "license": "MIT"
+}
