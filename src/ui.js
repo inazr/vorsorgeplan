@@ -104,7 +104,7 @@ function renderKPIs() {
     const d = R.netB - R.netA;
     html += kpi('Nur ETF-Depot (A)', eur(R.netA) + '/Monat', 'Netto in heutiger Kaufkraft', 'sA');
     html += kpi('Mit Altersvorsorgedepot (B)', eur(R.netB) + '/Monat', 'Netto in heutiger Kaufkraft', 's2', true);
-    html += kpi('Unterschied B gegen A', (d >= 0 ? '+' : '') + eur(d) + '/Monat', (d >= 0 ? '+' : '') + pc(d / R.netA) + ' · bis ' + (I.persons[I.withdraw.refPerson].name) + ' ' + I.withdraw.targetAge);
+    html += kpi('Vorteil B gegenüber A', (d >= 0 ? '+' : '') + eur(d) + '/Monat', (d >= 0 ? '+' : '') + pc(d / R.netA) + ' · bis ' + (I.persons[I.withdraw.refPerson].name) + ' ' + I.withdraw.targetAge);
   } else {
     const yA = sA.depletedYear, yB = sB.depletedYear;
     html += kpi('Kapital reicht (A)', yA ? 'bis ' + (yA - 1) : 'bis Zielalter', yA ? 'danach fehlen Mittel' : 'Endvermögen ' + keur(sA.final), 'sA');
@@ -795,3 +795,5 @@ if (ST.A.mcRuns == null) ST.A.mcRuns = 200;
 renderPanels();
 recalc();
 try { const t = +localStorage.getItem(STORE_KEY + '-tab'); if (t > 0) $$('.tab')[t].click(); } catch (e) { }
+try { if (localStorage.getItem(STORE_KEY + '-disclaimer')) $('#disclaimer').hidden = true; } catch (e) { }
+$('#disclaimer-close').onclick = () => { $('#disclaimer').hidden = true; try { localStorage.setItem(STORE_KEY + '-disclaimer', '1'); } catch (e) { } };
