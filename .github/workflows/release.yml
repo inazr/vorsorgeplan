@@ -1,0 +1,61 @@
+name: Release
+
+# Erstellt automatisch ein Release, sobald auf main eine neue Version in package.json steht.
+# Ein Tag v<Version> wird dabei angelegt. Alternativ startet ein manuell gepushter Tag v* das Release.
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Version bestimmen
+        id: v
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            VERSION="${GITHUB_REF#refs/tags/v}"
+          else
+            VERSION=$(node -p "require('./package.json').version")
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse "v$VERSION" >/dev/null 2>&1 && [[ "$GITHUB_REF" != refs/tags/v* ]]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Version $VERSION ist bereits veröffentlicht. Kein neues Release."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Tests
+        if: steps.v.outputs.exists == 'false'
+        run: node test/run-tests.mjs
+
+      - name: Build
+        if: steps.v.outputs.exists == 'false'
+        env:
+          VERSION: ${{ steps.v.outputs.version }}
+        run: |
+          node scripts/build.mjs
+          cp dist/index.html "dist/vorsorgeplan-${VERSION}.html"
+
+      - name: Release erstellen
+        if: steps.v.outputs.exists == 'false'
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.v.outputs.version }}
+          name: Vorsorgeplan ${{ steps.v.outputs.version }}
+          generate_release_notes: true
+          files: dist/vorsorgeplan-${{ steps.v.outputs.version }}.html
