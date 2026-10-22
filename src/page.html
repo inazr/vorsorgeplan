@@ -89,6 +89,8 @@ main.wrap { padding-block: 20px 60px; display: block; }
 .chk input { width: 16px; height: 16px; accent-color: var(--accent); }
 .note { font-size: 12px; color: var(--ink-2); background: var(--surface-2); border-radius: 6px; padding: 8px 10px; }
 .note b { color: var(--ink); }
+.disclaimer { margin: 16px 0 4px; border: 1px solid var(--warn); border-left-width: 4px; background: var(--warn-soft); color: var(--ink); border-radius: var(--r); padding: 10px 14px; font-size: 13px; }
+.disclaimer b { color: var(--warn); }
 .facts { display: grid; grid-template-columns: repeat(auto-fit, minmax(130px, 1fr)); gap: 8px; }
 .fact { border-top: 1px solid var(--line); padding-top: 6px; }
 .fact .l { font-size: 11px; color: var(--ink-3); }
@@ -151,6 +153,7 @@ textarea { width: 100%; min-height: 120px; font-family: var(--font-num); font-si
 </header>
 
 <main class="wrap">
+  <aside class="disclaimer" role="note"><b>Keine Anlage-, Steuer- oder Rechtsberatung.</b> Der Rechner ist eine Modellrechnung mit vereinfachten Annahmen und ersetzt keine persönliche Beratung. Alle Angaben ohne Gewähr.</aside>
   <section class="panel" id="io" hidden>
     <div class="card">
       <div class="card-h"><h2>Eingaben sichern oder laden</h2><button class="btn" id="io-close">Schließen</button></div>
