@@ -2,9 +2,13 @@
 // ANALYSEN: Maximales Netto, Optimierer, Monte Carlo, Haus-Break-even
 // ═══════════════════════════════════════════════════════════════
 
+// Ewige Rente: Das reale Nettovermögen zum Zielalter ist mindestens so hoch wie zu Entnahmebeginn
+const keepsCapital = (I, s) => I.withdraw.strategy !== 'perpetual' || s.finalReal >= s.startReal;
+
 // Höchstes reales Netto (heutige Kaufkraft), bei dem das Vermögen bis zum Zielalter reicht
+// (bei der ewigen Rente zusätzlich real erhalten bleibt)
 function maxNet(I, A, scenario, path, guess) {
-  const ok = n => !simulate(I, A, { scenario, targetReal: n, path }).depleted;
+  const ok = n => { const s = simulate(I, A, { scenario, targetReal: n, path }); return !s.depleted && keepsCapital(I, s); };
   let lo, hi;
   if (guess > 0) {
     lo = guess * 0.9; hi = guess * 1.1;
@@ -94,7 +98,7 @@ function monteCarlo(I, A, opts, onStep, onDone) {
       for (const sc of ['A', 'B']) {
         res[sc].push(maxNet(I, A, sc, path, det[sc]));
         const r = simulate(I, A, { scenario: sc, targetReal: det[sc], path, detail: true });
-        if (r.depleted) fail[sc]++;
+        if (r.depleted || !keepsCapital(I, r)) fail[sc]++;
         fan[sc].push(r.rows.map(x => x.total / x.priceIdx));
       }
     }

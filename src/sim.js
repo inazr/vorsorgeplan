@@ -116,7 +116,7 @@ function kvdrCheck(P, nKidsAll = P.kidsForKvdr ?? 0) {
 // ═══════════════════════════════════════════════════════════════
 // simulate(I, A, opt)
 //   opt.scenario: 'A' (nur ETF) | 'B' (ETF + Altersvorsorgedepot)
-//   opt.targetReal: Ziel-Nettoeinkommen/Monat in heutiger Kaufkraft (Strategie realConst)
+//   opt.targetReal: Ziel-Nettoeinkommen/Monat in heutiger Kaufkraft (Strategien realConst und perpetual)
 //   opt.path: [{R, infl}] je Jahr (Monte Carlo), sonst deterministisch
 //   opt.detail: Jahreszeilen mitschreiben
 // ═══════════════════════════════════════════════════════════════
@@ -150,6 +150,7 @@ function simulate(I, A, opt) {
   let sumZulagen = 0, sumRefunds = 0, sumKapTax = 0, sumVP = 0, houseSale = null;
   const rows = [];
   let minNetRatio = Infinity;
+  let startReal = I.depot.startValue;   // reales Nettovermögen zu Entnahmebeginn (Ende des Vorjahres)
 
   for (let year = Y0; year <= endYear; year++) {
     const t = year - Y0;
@@ -352,7 +353,7 @@ function simulate(I, A, opt) {
     }
 
     if (inWithdraw) {
-      if (I.withdraw.strategy === 'realConst') target = opt.targetReal * wMonths * priceIdx;
+      if (I.withdraw.strategy !== 'fixedNet') target = opt.targetReal * wMonths * priceIdx;
       else if (I.withdraw.strategy === 'fixedNet') target = I.withdraw.fixedNet * wMonths * (I.withdraw.fixedIndexed ? priceIdx : 1);
       target += loanInW + payoffInW;   // Kreditraten und Ablösung in den Entnahmemonaten zusätzlich
       const netOf = g => { const e = evalYear(g, true); return { net: grossW + g - e.it.total * wT - e.kt.taxW - sum(e.kvR.per.map((c, i) => c * kvShare[i])), e }; };
@@ -443,6 +444,7 @@ function simulate(I, A, opt) {
         est: estShare, kapTax: ev.kt.tax / np, kv: kvI, net, total: dv / np + av[i],
       };
     });
+    if (year === wStartYear - 1) startReal = (dv + av.reduce((a, b) => a + b, 0) - debt) / priceIdx;
     if (inWithdraw && shortfall && !depleted) { depleted = true; depletedYear = year; }
     if (inWithdraw && target > 0) minNetRatio = Math.min(minNetRatio, netIncome / target);
 
@@ -462,7 +464,8 @@ function simulate(I, A, opt) {
 
   const wRows = rows.filter(r => r.phase === 'Entnahme');
   return {
-    rows, depleted, depletedYear, wStartYear, wFullYear, endYear, minNetRatio,
+    rows, depleted, depletedYear, wStartYear, wFullYear, endYear, minNetRatio, startReal,
+    finalReal: (depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0) - loans.reduce((a, l) => a + l.bal, 0)) / priceIdx,
     final: depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0),
     kv, sumZulagen, sumRefunds, sumKapTax, sumVP, houseSale, loans,
     ep,

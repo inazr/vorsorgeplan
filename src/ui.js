@@ -79,7 +79,7 @@ function recalc() {
   const { I, A } = ST;
   const t0 = performance.now();
   const out = {};
-  if (I.withdraw.strategy === 'realConst') {
+  if (I.withdraw.strategy !== 'fixedNet') {
     out.netA = maxNet(I, A, 'A');
     out.netB = maxNet(I, A, 'B', null, out.netA);
   }
@@ -100,10 +100,12 @@ function renderKPIs() {
   const rA = rowAt(sA, ws - 1), rB = rowAt(sB, ws - 1);
   const wA = rA ? rA.netWorth / rA.priceIdx : 0, wB = rB ? rB.netWorth / rB.priceIdx : 0;
   let html = '';
-  if (I.withdraw.strategy === 'realConst') {
+  if (I.withdraw.strategy !== 'fixedNet') {
+    const perp = I.withdraw.strategy === 'perpetual';
     const d = R.netB - R.netA;
-    html += kpi('Nur ETF-Depot (A)', eur(R.netA) + '/Monat', 'Netto in heutiger Kaufkraft', 'sA');
-    html += kpi('Mit Altersvorsorgedepot (B)', eur(R.netB) + '/Monat', 'Netto in heutiger Kaufkraft', 's2', true);
+    const sub = perp ? 'Netto heute, Kapital bleibt real erhalten' : 'Netto in heutiger Kaufkraft';
+    html += kpi('Nur ETF-Depot (A)', eur(R.netA) + '/Monat', sub, 'sA');
+    html += kpi('Mit Altersvorsorgedepot (B)', eur(R.netB) + '/Monat', sub, 's2', true);
     html += kpi('Vorteil B gegenüber A', (d >= 0 ? '+' : '') + eur(d) + '/Monat', (d >= 0 ? '+' : '') + pc(d / R.netA) + ' · bis ' + (I.persons[I.withdraw.refPerson].name) + ' ' + I.withdraw.targetAge);
   } else {
     const yA = sA.depletedYear, yB = sB.depletedYear;
@@ -394,12 +396,12 @@ function renderP1() {
     <div class="card">
       <div class="card-h"><h2>Entnahme im Ruhestand</h2></div>
       <div class="fields">
-        ${S('I.withdraw.strategy', 'Strategie', [['realConst', 'Höchstes gleichbleibendes Netto'], ['fixedNet', 'Wunsch-Netto vorgeben']], { rr: 1 })}
-        ${F('I.withdraw.targetAge', 'Geld soll reichen bis Alter', { t: 'int', min: 80, max: 105 })}
+        ${S('I.withdraw.strategy', 'Strategie', [['realConst', 'Höchstes gleichbleibendes Netto'], ['perpetual', 'Ewige Rente (Kapital bleibt erhalten)'], ['fixedNet', 'Wunsch-Netto vorgeben']], { rr: 1 })}
+        ${F('I.withdraw.targetAge', W.strategy === 'perpetual' ? 'Kapital prüfen bis Alter' : 'Geld soll reichen bis Alter', { t: 'int', min: 80, max: 105 })}
         ${S('I.withdraw.refPerson', 'Alter von', I.persons.map((p, i) => [i, p.name]))}
         ${W.strategy === 'fixedNet' ? F('I.withdraw.fixedNet', 'Wunsch-Netto heute', { t: 'eur', u: '€/Monat', step: 100 }) + `<div class="f"><label>&nbsp;</label>${C('I.withdraw.fixedIndexed', 'Mit Inflation anpassen')}</div>` : ''}
       </div>
-      <p class="note">Netto heißt hier: gesetzliche Renten, Auszahlungen aus dem Altersvorsorgedepot und Verkäufe aus dem ETF-Depot, abzüglich Einkommensteuer, Soli, Kapitalertragsteuer und eigener Kranken- und Pflegeversicherung. Die Entnahme beginnt, wenn beide in Rente sind.</p>
+      <p class="note">Netto heißt hier: gesetzliche Renten, Auszahlungen aus dem Altersvorsorgedepot und Verkäufe aus dem ETF-Depot, abzüglich Einkommensteuer, Soli, Kapitalertragsteuer und eigener Kranken- und Pflegeversicherung. Die Entnahme beginnt, wenn beide in Rente sind.${W.strategy === 'perpetual' ? ' <b>Ewige Rente:</b> Das Netto ist so gewählt, dass das Nettovermögen (ETF-Depot und Altersvorsorgedepot) im gewählten Alter in heutiger Kaufkraft mindestens so hoch ist wie zu Entnahmebeginn. Das Altersvorsorgedepot wird per Auszahlungsplan verbraucht, das ETF-Depot muss das ausgleichen.' : ''}</p>
       <h3>Annahmen</h3>
       <div class="fields">
         ${F('A.ret', 'Rendite Aktien pro Jahr', { t: 'pct', h: 'Vor Fondskosten. Gilt als typischer Verlauf (Median).' })}
@@ -498,8 +500,7 @@ function renderP2() {
   <div class="card"><div class="card-h"><h2>Kapital je ETF-Sparplan</h2><span class="muted" id="funds-sub"></span></div><div class="chart" id="ch-funds" role="img" aria-label="Kapital je ETF-Sparplan"></div></div>
   <div class="card"><div class="card-h"><h2>Altersvorsorgedepot</h2><span class="muted" id="avd-sub"></span></div><div class="chart" id="ch-avd" role="img" aria-label="Kapital und Auszahlungen im Altersvorsorgedepot"></div></div>
   <div class="grid">
-    <div class="card"><h2>Sparen pro Jahr</h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div>
-      <p class="note"><b>Annahme:</b> Die Steuer auf Ausschüttungen und Vorabpauschale des ETF-Depots wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a) fließen zusätzlich ins ETF-Depot.</p></div>
+    <div class="card"><h2>Sparen pro Jahr<span class="infotip" tabindex="0" aria-label="Annahmen">i<span class="tip" role="tooltip"><b>Annahme:</b> Die Steuer auf Ausschüttungen und Vorabpauschale des ETF-Depots wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a) fließen zusätzlich ins ETF-Depot.</span></span></h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div></div>
     <div class="card"><h2>Einkommen im Ruhestand pro Monat</h2><div class="chart sm" id="ch-income" role="img" aria-label="Einkommen im Ruhestand"></div></div>
   </div>
   <div class="grid">
@@ -589,8 +590,14 @@ function renderCharts() {
   if (!R) return;
   const sim = chartScen === 'A' ? R.simA : R.simB, other = chartScen === 'A' ? R.simB : R.simA;
   const dv = (r, v) => chartReal ? v / r.priceIdx : v;
-  const C1 = cssv('--s1'), C2 = cssv('--s2'), C3 = cssv('--s3'), C4 = cssv('--s4'), C5 = cssv('--s5'), C7 = cssv('--s7'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
+  const C1 = cssv('--s1'), C2 = cssv('--s2'), C3 = cssv('--s3'), C4 = cssv('--s4'), C5 = cssv('--s5'), C6 = cssv('--s6'), C7 = cssv('--s7'), C8 = cssv('--s8'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
   const years = sim.rows.map(r => r.year);
+  // Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
+  const area = (name, data, color, stack) => ({ name, type: 'line', stack, symbol: 'none', data, lineStyle: { width: 1, color }, itemStyle: { color }, areaStyle: { color, opacity: 0.25 } });
+  const total = (name, data, extra = {}) => ({ name, type: 'line', symbol: 'none', data, lineStyle: { width: 2, color: ink }, itemStyle: { color: ink }, ...extra });
+  const wLine = ws => ({ markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } });
+  // Farben je Chart: Sparen und Einkommen ohne gemeinsame Farben (Reihenfolge mit validate_palette geprüft)
+  const SP = [CA, C8, C6, C5, C7, C4], IN = [C1, C2, C3];
   const bar = (name, data, color, stack = 's') => ({ name, type: 'bar', stack, data, itemStyle: { color, borderColor: surf, borderWidth: 1, borderRadius: 0 }, barMaxWidth: 18, emphasis: { focus: 'series' } });
   const ws = sim.wStartYear;
   const who = chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt';
@@ -601,12 +608,11 @@ function renderCharts() {
   chartOf('ch-wealth').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: years },
     series: [
-      { name: chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', type: 'line', stack: 'w', symbol: 'none', data: sim.rows.map(r => dv(r, V(r, 'etf'))), lineStyle: { width: 2, color: C3 }, itemStyle: { color: C3 }, areaStyle: { color: C3, opacity: 0.22 } },
-      ...(chartScen === 'B' ? [{ name: 'Altersvorsorgedepot', type: 'line', stack: 'w', symbol: 'none', data: sim.rows.map(r => dv(r, V(r, 'avd'))), lineStyle: { width: 2, color: C2 }, itemStyle: { color: C2 }, areaStyle: { color: C2, opacity: 0.22 } }] : []),
-      ...(sim.rows.some(r => r.debt > 0) ? [{ name: 'Restschuld Haus', type: 'line', stack: 'd', symbol: 'none', data: sim.rows.map(r => -dv(r, V(r, 'debt'))), lineStyle: { width: 2, color: C7 }, itemStyle: { color: C7 }, areaStyle: { color: C7, opacity: 0.18 } }] : []),
-      { name: 'Nettovermögen', type: 'line', symbol: 'none', data: sim.rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, color: ink }, itemStyle: { color: ink } },
-      { name: chartScen === 'A' ? 'Nettovermögen B' : 'Nettovermögen A', type: 'line', symbol: 'none', data: other.rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: chartScen === 'A' ? C2 : CA }, itemStyle: { color: chartScen === 'A' ? C2 : CA },
-        markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } },
+      area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), C3, 'w'),
+      ...(chartScen === 'B' ? [area('Altersvorsorgedepot', sim.rows.map(r => dv(r, V(r, 'avd'))), C2, 'w')] : []),
+      ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), C7, 'd')] : []),
+      total('Nettovermögen', sim.rows.map(r => dv(r, V(r, 'netWorth'))), wLine(ws)),
+      { name: chartScen === 'A' ? 'Nettovermögen B' : 'Nettovermögen A', type: 'line', symbol: 'none', data: other.rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: chartScen === 'A' ? C2 : CA }, itemStyle: { color: chartScen === 'A' ? C2 : CA } },
     ],
   }), true);
 
@@ -622,11 +628,8 @@ function renderCharts() {
       const tot = vis.reduce((a, p) => a + p.value, 0);
       return `<b>${ps[0].axisValue}</b><br>` + (vis.length ? vis.map(p => `${p.marker} ${p.seriesName}: <b>${eur(p.value)}</b>`).join('<br>') + `<br>Summe: <b>${eur(tot)}</b>` : 'Depot leer');
     } },
-    series: [...fundsCfg.map((f, k) => ({
-      name: f.name, type: 'line', stack: 'f', symbol: 'none', data: sim.rows.map(r => dv(r, (r.funds[k] || 0) * share)),
-      lineStyle: { width: 0 }, itemStyle: { color: FC[k] }, areaStyle: { color: FC[k], opacity: 0.55 },
-      ...(k === 0 ? { markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } } : {}),
-    })), { name: 'Summe', type: 'line', symbol: 'none', data: sim.rows.map(r => dv(r, sum(r.funds) * share)), lineStyle: { width: 1.5, color: ink }, itemStyle: { color: ink } }],
+    series: [...fundsCfg.map((f, k) => area(f.name, sim.rows.map(r => dv(r, (r.funds[k] || 0) * share)), FC[k], 'f')),
+      total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), wLine(ws))],
   }), true);
 
   // Altersvorsorgedepot: Kapital je Person (Flächen) und Auszahlungen pro Monat (Linien)
@@ -635,18 +638,13 @@ function renderCharts() {
     const avdSim = R.simB;   // das Depot gibt es nur in Szenario B
     const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
     $('#avd-sub').textContent = `Szenario B · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · ${chartReal ? 'in heutiger Kaufkraft' : 'nominal'}`;
-    const starts = idx.map(i => avdSim.rows.find(x => x.avdPay[i] > 0)?.year).filter(Boolean);
-    const ends = idx.map(i => { const rr = avdSim.rows.filter(x => x.avdPay[i] > 0); return rr.length ? rr[rr.length - 1].year : null; }).filter(Boolean);
     let cum = 0;
     const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => a + r.pp[i].avdIn + r.pp[i].zul, 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
     chartOf('ch-avd').setOption(baseOpt({
       xAxis: { ...baseOpt().xAxis, data: avdSim.rows.map(r => r.year) },
       series: [
-        ...idx.map((i, n) => ({ name: P[i].name, type: 'line', stack: 'a', symbol: 'none', data: avdSim.rows.map(r => dv(r, r.avd[i])),
-          lineStyle: { width: 0 }, itemStyle: { color: PC[i] }, areaStyle: { color: PC[i], opacity: 0.45 },
-          ...(n === 0 && starts.length ? { markArea: { silent: true, itemStyle: { color: cssv('--surface-2'), opacity: 0.6 }, label: { color: cssv('--ink-2'), position: 'insideTop' },
-            data: [[{ name: 'Auszahlungsphase', xAxis: String(Math.min(...starts)) }, { xAxis: String(Math.max(...ends)) }]] } } : {}) })),
-        { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 1.5, type: [6, 3], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') } },
+        ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, r.avd[i])), PC[i], 'a')),
+        { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(avdSim.wStartYear) },
       ],
     }), true);
   }
@@ -657,11 +655,11 @@ function renderCharts() {
     xAxis: { ...baseOpt().xAxis, data: sr.map(r => r.saveMonths < 12 ? `${r.year} (${r.saveMonths} Mon.)` : r.year) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => `<b>${ps[0].axisValue}</b><br>` + ps.map(p => `${p.marker} ${p.seriesName}: <b>${eur(p.value)}</b>`).join('<br>') + `<br>Summe: <b>${eur(ps.reduce((a, p) => a + p.value, 0))}</b>` },
     series: [
-      bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), CA),
-      bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), C7),
-      bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), C3),
-      bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), C5),
-      ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', sr.map(r => dv(r, V(r, 'avdIn'))), C2), bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), C4)] : []),
+      bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), SP[0]),
+      bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), SP[1]),
+      bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), SP[2]),
+      bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), SP[3]),
+      ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', sr.map(r => dv(r, V(r, 'avdIn'))), SP[4]), bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), SP[5])] : []),
     ],
   }), true);
 
@@ -673,9 +671,9 @@ function renderCharts() {
   chartOf('ch-income').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
     series: [
-      bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), C1),
-      ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', er.map(r => m(r, V(r, 'avdPayW'))), C2)] : []),
-      bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), C3),
+      bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), IN[0]),
+      ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', er.map(r => m(r, V(r, 'avdPayW'))), IN[1])] : []),
+      bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), IN[2]),
       { name: 'Netto', type: 'line', symbol: 'circle', symbolSize: 4, data: er.map(r => m(r, V(r, 'net'))), lineStyle: { width: 2, color: ink }, itemStyle: { color: ink } },
     ],
   }), true);
