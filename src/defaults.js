@@ -18,7 +18,7 @@ const DEFAULTS = {
   budget: { monthly: 1000, dyn: 0.02 },
   loans: [],
   depot: {
-    startValue: 10000, startCost: 9000, nFunds: 3, sellMode: 'newestFirst', divRedirect: true,
+    startValue: 10000, startCost: 9000, freistellung: 2000, nFunds: 3, sellMode: 'newestFirst', divRedirect: true,
     funds: [
       { name: 'MSCI World (aussch.)', type: 'dist', tf: 0.3, ter: 0.002, divY: 0.018, from: 2027, to: 2039 },
       { name: 'FTSE All-World (thes.)', type: 'acc', tf: 0.3, ter: 0.0019, divY: 0, from: 2040, to: 2051 },

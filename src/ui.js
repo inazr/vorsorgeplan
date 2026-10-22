@@ -388,6 +388,7 @@ function renderP1() {
         ${S('I.depot.nFunds', 'Anzahl Sparpläne', [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']], { rr: 1 })}
         ${S('I.depot.sellMode', 'Verkaufen zuerst aus', [['newestFirst', 'zuletzt bespartem Fonds'], ['inOrder', 'Fonds 1, 2, 3 …']])}
         <div class="f"><label>&nbsp;</label>${C('I.depot.divRedirect', 'Ausschüttungen in aktuellen Sparplan')}</div>
+        ${F('I.depot.freistellung', 'Freistellungsauftrag', { t: 'eur', u: '€/Jahr', step: 100, min: 0, max: 2000, h: 'Für dieses Depot genutzter Sparerpauschbetrag, Paare höchstens 2.000 €' })}
       </div>
       <p class="note">Die Staffelung nutzt FIFO. Wer im Alter zuerst den jüngsten Fonds verkauft, versteuert anfangs wenig Gewinn. Das verschiebt Steuern nach hinten.</p>
       <div id="fund-issues"></div>
@@ -547,6 +548,11 @@ function chartOf(id) {
   if (!charts[id]) charts[id] = echarts.init(el, null, { renderer: 'canvas' });
   return charts[id];
 }
+// Tooltip: Bezeichnungen links, Werte rechtsbündig untereinander
+const tipRow = (label, v, strong) => `<span${strong ? ' style="font-weight:700"' : ''}>${label}</span><span style="text-align:right;font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:${strong ? 700 : 600}">${v == null ? '–' : eur(v)}</span>`;
+const tipSum = ps => tipRow('Summe', ps.reduce((a, p) => a + (p.value || 0), 0), true);
+const tip = (title, rows) => `<b>${title}</b><div style="display:grid;grid-template-columns:auto auto;column-gap:16px;row-gap:2px;margin-top:4px">${rows.join('')}</div>`;
+const tipSeries = ps => ps.map(p => tipRow(`${p.marker}${p.seriesName}`, p.value));
 function baseOpt(extra = {}) {
   const ink2 = cssv('--ink-2'), ink3 = cssv('--ink-3'), line = cssv('--line'), surf = cssv('--surface');
   return {
@@ -554,7 +560,7 @@ function baseOpt(extra = {}) {
     textStyle: { fontFamily: 'Public Sans, system-ui, sans-serif', color: ink2 },
     grid: { left: 8, right: 16, top: window.innerWidth < 600 ? 68 : 44, bottom: 8, containLabel: true },
     legend: { top: 0, left: 0, textStyle: { color: ink2, fontSize: 12 }, itemWidth: 12, itemHeight: 8, icon: 'roundRect' },
-    tooltip: { trigger: 'axis', backgroundColor: surf, borderColor: line, textStyle: { color: cssv('--ink'), fontSize: 12 }, valueFormatter: v => v == null ? '–' : eur(v) },
+    tooltip: { trigger: 'axis', backgroundColor: surf, borderColor: line, textStyle: { color: cssv('--ink'), fontSize: 12 }, formatter: ps => tip(ps[0].axisValue, tipSeries(ps)) },
     xAxis: { type: 'category', axisLine: { lineStyle: { color: line } }, axisTick: { show: false }, axisLabel: { color: ink3 } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: line, type: [3, 3] } }, axisLabel: { color: ink3, formatter: v => Math.abs(v) >= 1e6 ? (v / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' Mio.' : Math.abs(v) >= 1e3 ? (v / 1e3).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' Tsd.' : nf0.format(v) } },
     ...extra,
@@ -626,7 +632,7 @@ function renderCharts() {
     tooltip: { ...baseOpt().tooltip, formatter: ps => {
       const vis = ps.filter(p => p.seriesIndex < fundsCfg.length && p.value > 0.5);
       const tot = vis.reduce((a, p) => a + p.value, 0);
-      return `<b>${ps[0].axisValue}</b><br>` + (vis.length ? vis.map(p => `${p.marker} ${p.seriesName}: <b>${eur(p.value)}</b>`).join('<br>') + `<br>Summe: <b>${eur(tot)}</b>` : 'Depot leer');
+      return vis.length ? tip(ps[0].axisValue, [...tipSeries(vis), tipRow('Summe', tot, true)]) : `<b>${ps[0].axisValue}</b><br>Depot leer`;
     } },
     series: [...fundsCfg.map((f, k) => area(f.name, sim.rows.map(r => dv(r, (r.funds[k] || 0) * share)), FC[k], 'f')),
       total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), wLine(ws))],
@@ -653,7 +659,7 @@ function renderCharts() {
   const sr = sim.rows.filter(r => r.saveMonths > 0);
   chartOf('ch-save').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: sr.map(r => r.saveMonths < 12 ? `${r.year} (${r.saveMonths} Mon.)` : r.year) },
-    tooltip: { ...baseOpt().tooltip, formatter: ps => `<b>${ps[0].axisValue}</b><br>` + ps.map(p => `${p.marker} ${p.seriesName}: <b>${eur(p.value)}</b>`).join('<br>') + `<br>Summe: <b>${eur(ps.reduce((a, p) => a + p.value, 0))}</b>` },
+    tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
     series: [
       bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), SP[0]),
       bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), SP[1]),
@@ -670,6 +676,7 @@ function renderCharts() {
   const wYear = r => r.wMonths < 12 ? `${r.year} (${r.wMonths} Mon.)` : r.year;
   chartOf('ch-income').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
+    tooltip: { ...baseOpt().tooltip, formatter: ps => { const b = ps.filter(p => p.seriesType === 'bar'); return tip(ps[0].axisValue, [...tipSeries(b), tipSum(b), ...tipSeries(ps.filter(p => p.seriesType !== 'bar'))]); } },
     series: [
       bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), IN[0]),
       ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', er.map(r => m(r, V(r, 'avdPayW'))), IN[1])] : []),
@@ -681,6 +688,7 @@ function renderCharts() {
   // Abzüge
   chartOf('ch-deduct').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
+    tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
     series: [
       bar('Einkommensteuer + Soli', er.map(r => m(r, V(r, 'estW'))), C4),
       bar('Kapitalertragsteuer', er.map(r => m(r, V(r, 'kapTaxW'))), C5),
@@ -742,7 +750,7 @@ function renderMC() {
   chartOf('ch-mc-fan').setOption(baseOpt({
     title: { text: 'Vermögen beim festen Netto, heutige Kaufkraft', textStyle: { fontSize: 12, color: cssv('--ink-2'), fontWeight: 600 }, right: 0, top: 0 },
     legend: { show: false },
-    tooltip: { ...baseOpt().tooltip, formatter: ps => { const i = ps[0].dataIndex; return `<b>${r.years[i]}</b><br>90 %: ${eur(p90[i])}<br>75 %: ${eur(p75[i])}<br>50 %: ${eur(p50[i])}<br>25 %: ${eur(p25[i])}<br>10 %: ${eur(p10[i])}`; } },
+    tooltip: { ...baseOpt().tooltip, formatter: ps => { const i = ps[0].dataIndex; return tip(r.years[i], [['90 %', p90], ['75 %', p75], ['50 %', p50], ['25 %', p25], ['10 %', p10]].map(([l, a]) => tipRow(l, a[i]))); } },
     xAxis: { ...baseOpt().xAxis, data: r.years },
     series: [
       { name: 'b', type: 'line', stack: 'f', symbol: 'none', data: p10, lineStyle: { opacity: 0 }, areaStyle: { opacity: 0 } },
@@ -793,5 +801,6 @@ if (ST.A.mcRuns == null) ST.A.mcRuns = 200;
 renderPanels();
 recalc();
 try { const t = +localStorage.getItem(STORE_KEY + '-tab'); if (t > 0) $$('.tab')[t].click(); } catch (e) { }
-try { if (localStorage.getItem(STORE_KEY + '-disclaimer')) $('#disclaimer').hidden = true; } catch (e) { }
-$('#disclaimer-close').onclick = () => { $('#disclaimer').hidden = true; try { localStorage.setItem(STORE_KEY + '-disclaimer', '1'); } catch (e) { } };
+// Hinweis nur für die laufende Sitzung ausblenden, beim nächsten Öffnen ist er wieder da
+try { if (sessionStorage.getItem(STORE_KEY + '-disclaimer')) $('#disclaimer').hidden = true; } catch (e) { }
+$('#disclaimer-close').onclick = () => { $('#disclaimer').hidden = true; try { sessionStorage.setItem(STORE_KEY + '-disclaimer', '1'); } catch (e) { } };

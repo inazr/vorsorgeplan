@@ -65,12 +65,12 @@ function incomeTax(zvE, nKids, L) {
   return { est, soli: soliOf(soliBase, L), total: est + soliOf(soliBase, L) };
 }
 
-// Kapitalertragsteuer mit Pauschbetrag, Verlustvortrag, optional Günstigerprüfung
-function kapTax(kapTaxable, lossCarry, L, zvEOther, nKids, A) {
+// Kapitalertragsteuer mit Pauschbetrag (Freistellungsauftrag), Verlustvortrag, optional Günstigerprüfung
+function kapTax(kapTaxable, lossCarry, L, zvEOther, nKids, A, pb = LAW.sparerPB) {
   let base = kapTaxable - lossCarry;
   let newLoss = 0;
   if (base < 0) { newLoss = -base; base = 0; }
-  const afterSPB = Math.max(0, base - LAW.sparerPB);
+  const afterSPB = Math.max(0, base - Math.min(pb, LAW.sparerPB));
   const abg = afterSPB * LAW.abgSt * (1 + LAW.soliKap);
   let tax = abg, guenstiger = false;
   if (A.guenstiger && afterSPB > 0) {
@@ -145,6 +145,7 @@ function simulate(I, A, opt) {
   // Kredit
   const B = I.budget;
   const loans = makeLoans(I.loans || [], Y0 * 12);
+  const pb = I.depot.freistellung ?? LAW.sparerPB;   // Freistellungsauftrag für das ETF-Depot
 
   let priceIdx = 1, pendingKap = 0, pendingRefund = 0, depleted = false, depletedYear = null;
   let sumZulagen = 0, sumRefunds = 0, sumKapTax = 0, sumVP = 0, houseSale = null;
@@ -332,9 +333,9 @@ function simulate(I, A, opt) {
       const kvR = kvRetire(kapForKV / 2);
       const zvE = Math.max(0, otherIncome - vorsorge - kvR.deductible - LAW.pausch.sonderausg);
       const it = incomeTax(zvE, nKids, L);
-      const kt = kapTax(kapT, depot.lossCarry, L, zvE, nKids, A);
+      const kt = kapTax(kapT, depot.lossCarry, L, zvE, nKids, A, pb);
       // Steuer auf Vorabpauschale/Ausschüttungen des Vorjahres ist im Januar fällig, Steuer auf Verkäufe in der Entnahme
-      kt.taxW = !inWithdraw ? 0 : wStartAbs <= yearAbs0 ? kt.tax : Math.max(0, kt.tax - kapTax(pendingKap, depot.lossCarry, L, zvE, nKids, A).tax);
+      kt.taxW = !inWithdraw ? 0 : wStartAbs <= yearAbs0 ? kt.tax : Math.max(0, kt.tax - kapTax(pendingKap, depot.lossCarry, L, zvE, nKids, A, pb).tax);
       return { sale, it, kt, kvR, zvE };
     }
 
