@@ -1,22 +1,54 @@
-# Vorsorgeplan
+<div align="center">
 
-*Stand: 22.10.2026, 18:06 Uhr · Rechtsstand 20.10.2026*
+<h1>Vorsorgeplan</h1>
+
+<h3>Altersvorsorgedepot oder ETF-Depot? Der Rechner zeigt, was am Ende netto übrig bleibt.</h3>
+
+<p>
+  <a href="https://inazr.github.io/vorsorgeplan/"><img alt="Online öffnen" src="https://img.shields.io/badge/Online_öffnen-1f5f8b?style=for-the-badge&logo=googlechrome&logoColor=white"></a>
+  <a href="https://github.com/inazr/vorsorgeplan/releases/latest"><img alt="Offline-Version herunterladen" src="https://img.shields.io/badge/Offline--Version_laden-1baf7a?style=for-the-badge&logo=html5&logoColor=white"></a>
+</p>
+
+<a href="https://inazr.github.io/vorsorgeplan/">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/screenshot-dark.png">
+    <img alt="Vorsorgeplan: Vermögensverlauf mit ETF-Depot und Altersvorsorgedepot" src="docs/screenshot-light.png" width="900">
+  </picture>
+</a>
+
+<p>
+  <a href="https://github.com/inazr/vorsorgeplan/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/inazr/vorsorgeplan?label=Version&color=1f5f8b"></a>
+  <a href="https://github.com/inazr/vorsorgeplan/actions/workflows/pages.yml"><img alt="GitHub Pages" src="https://img.shields.io/github/actions/workflow/status/inazr/vorsorgeplan/pages.yml?branch=main&label=GitHub%20Pages"></a>
+  <img alt="Rechtsstand" src="https://img.shields.io/badge/Rechtsstand-20.10.2026-eda100">
+  <img alt="Offline" src="https://img.shields.io/badge/l%C3%A4uft-offline-1baf7a">
+  <img alt="Keine Abhängigkeiten" src="https://img.shields.io/badge/Abh%C3%A4ngigkeiten-0-6250d6">
+  <a href="LICENSE"><img alt="Lizenz MIT" src="https://img.shields.io/badge/Lizenz-MIT-6f7b87"></a>
+</p>
+
+<p>
+  <a href="#was-der-rechner-abbildet"><b>Funktionen</b></a> ·
+  <a href="#rechtsstand-und-annahmen"><b>Rechtsstand</b></a> ·
+  <a href="#entwicklung"><b>Entwicklung</b></a> ·
+  <a href="#releases"><b>Releases</b></a>
+</p>
+
+<sub>⚠️ Keine Anlage-, Steuer- oder Rechtsberatung. Modellrechnung mit vereinfachten Annahmen, alle Angaben ohne Gewähr.</sub>
+
+</div>
+
+---
 
 Ein Rechner für die private Altersvorsorge in Deutschland. Er vergleicht zwei Wege für dasselbe Sparbudget:
 
-- **Szenario A:** alles in ein normales ETF-Depot
-- **Szenario B:** zuerst ins neue staatlich geförderte Altersvorsorgedepot (ab 2027), der Rest ins ETF-Depot
+| Szenario | Was mit dem Sparbudget passiert |
+|---|---|
+| **A** · nur ETF-Depot | Das ganze Sparbudget fließt in ein normales ETF-Depot. |
+| **B** · mit Altersvorsorgedepot | Zuerst ins staatlich geförderte Altersvorsorgedepot (ab 2027), der Rest ins ETF-Depot. |
 
-Gerechnet wird für einen Haushalt mit zwei Personen, von heute bis zum gewählten Zielalter. Steuern, Kranken- und Pflegeversicherung, gesetzliche Rente und Immobilienkredite sind eingerechnet. Ergebnis ist das höchste monatliche Netto im Ruhestand in heutiger Kaufkraft, das bis zum Zielalter reicht.
+Gerechnet wird monatsgenau für einen Haushalt mit zwei Personen, von heute bis zum gewählten Zielalter. Steuern, Kranken- und Pflegeversicherung, gesetzliche Rente und Immobilienkredite sind eingerechnet. Ergebnis ist das höchste monatliche Netto im Ruhestand in heutiger Kaufkraft: bis zum Zielalter, als ewige Rente mit realem Kapitalerhalt oder als Reichweite für ein Wunsch-Netto.
 
-Die Seite ist eine einzelne HTML-Datei. Sie läuft komplett im Browser, lädt nichts von fremden Servern nach und speichert Eingaben nur lokal im Browser.
-
-## Nutzung
-
-- **Online:** über GitHub Pages dieses Repositorys
-- **Offline:** Die Datei `vorsorgeplan-<version>.html` aus dem neuesten Release herunterladen und im Browser öffnen.
-
-Eingaben lassen sich über „Eingaben sichern / laden“ als Text kopieren und auf einem anderen Gerät wieder einfügen.
+> [!TIP]
+> Die Seite ist eine einzige HTML-Datei. Sie läuft komplett im Browser, lädt nichts von fremden Servern nach und speichert Eingaben nur lokal. Über „Eingaben sichern / laden“ lassen sie sich als Text auf ein anderes Gerät mitnehmen.
 
 ## Was der Rechner abbildet
 
@@ -24,17 +56,22 @@ Eingaben lassen sich über „Eingaben sichern / laden“ als Text kopieren und 
 - Zwei Personen, angestellt oder selbständig, mit eigener Einkommensentwicklung
 - Gesetzliche Rente über Entgeltpunkte oder die Prognose der Renteninformation, mit Abschlag bzw. Zuschlag bei früherem oder späterem Rentenbeginn
 - Krankenversicherung im Alter: KVdR mit automatischer Prüfung der 9/10-Regel, freiwillig gesetzlich oder privat
-- Beliebig viele Kinder mit Kindergeld, Kinderfreibetrag, Kinderzulage und Pflegeversicherungs-Abschlag
+- Beliebig viele Kinder mit Kindergeld, Kinderfreibetrag, Kinderzulage und Pflegeversicherungs-Abschlag, jeweils monatsgenau ab Geburt
 - Sparbudget mit jährlicher Steigerung, beliebig viele Annuitätendarlehen mit Zinsbindung, Sondertilgung, Anschlussfinanzierung oder Ablösung aus dem Depot
 
 **Anlage**
 - Altersvorsorgedepot je Person: Grundzulage, Kinderzulage, Sonderausgabenabzug mit Günstigerprüfung, ungeförderte Zusatzbeiträge, Auszahlungsplan, Einmalauszahlung bis 30 %
-- ETF-Depot mit bis zu fünf gestaffelten Sparplänen, FIFO je Fonds, Vorabpauschale, Teilfreistellung, Ausschüttungen, Sparerpauschbetrag und Verlustverrechnung
+- ETF-Depot mit bis zu fünf gestaffelten Sparplänen, FIFO je Fonds, Vorabpauschale, Teilfreistellung, Ausschüttungen, Freistellungsauftrag und Verlustverrechnung
+
+**Entnahme im Ruhestand**
+- Beginnt im Monat, in dem beide in Rente sind; Rente und Auszahlungen aus dem Altersvorsorgedepot starten jeweils im Monat nach dem Geburtstag
+- Drei Strategien: höchstes gleichbleibendes Netto bis zum Zielalter, ewige Rente (das Nettovermögen bleibt real erhalten) oder Reichweite für ein vorgegebenes Wunsch-Netto
 
 **Auswertung**
-- Kennzahlen A gegen B, Aufteilung nach Personen, Charts zu Vermögen, Fonds, Altersvorsorgedepot, Sparraten, Einkommen und Abzügen
+- Kennzahlen A gegen B, Aufteilung nach Personen, Charts zu Vermögen, Fonds, Altersvorsorgedepot, Sparraten, Einkommen und Abzügen mit Summen im Tooltip
+- Alle Werte wahlweise in heutiger Kaufkraft oder nominal, für den Haushalt oder je Person
 - Optimierer für die Einstellungen des Altersvorsorgedepots
-- Monte-Carlo-Simulation mit zufälligen Renditen und Inflation
+- Monte-Carlo-Simulation mit zufälligen Renditen und Inflation (Perzentile 10 bis 90 %)
 - Break-even-Zins für die Anschlussfinanzierung
 - Jahrestabelle
 
@@ -49,6 +86,12 @@ Eingaben lassen sich über „Eingaben sichern / laden“ als Text kopieren und 
 | Gesetzliche Rente | Rentenwert 42,52 € ab 01.07.2026, Haltelinie bis 2031, danach Dämpfung (einstellbar) | Gesetz / Annahme |
 | Krankenversicherung | BBG 2026/2027, Zusatzbeitrag 2,9 % mit einstellbarem Anstieg | Gesetz / Annahme |
 
+Annahmen der Rechnung:
+- Steuern und Sozialversicherung werden jährlich berechnet, alle Zeitpunkte (Rentenbeginn, Sparende, Auszahlungen, Kinder) monatsgenau. In angebrochenen Jahren werden Rente, Steuer und Beiträge anteilig auf die Entnahmemonate verteilt.
+- Die Steuer auf Ausschüttungen und Vorabpauschale wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a) fließen ins ETF-Depot.
+- Auszahlungen aus dem Altersvorsorgedepot vor dem Entnahmestart werden nach pauschal 30 % Steuer und Beiträgen ins ETF-Depot reinvestiert.
+- Der Sparerpauschbetrag wird nur in Höhe des eingegebenen Freistellungsauftrags berücksichtigt.
+
 Offene Punkte:
 - Ob freiwillig Versicherte Beiträge auf Auszahlungen aus dem Altersvorsorgedepot zahlen, ist gesetzlich nicht ausdrücklich geregelt. Der Rechner folgt der Praxis bei Riester.
 - Tarif, Beitragssätze und Rentenanpassung nach 2028 sind Annahmen.
@@ -61,9 +104,11 @@ Die Gesetzeswerte stehen in `src/law.js` (Steuern) und `src/sim.js` (Sozialversi
 Voraussetzung ist Node.js ab Version 20. Es gibt keine Abhängigkeiten.
 
 ```
-node test/run-tests.mjs    # Rechenproben
+node test/run-tests.mjs    # Rechenproben, gibt auch das Netto des Beispielhaushalts aus
 node scripts/build.mjs     # baut dist/index.html
 ```
+
+Die Engine-Dateien sind klassische Skripte ohne Module und teilen sich einen globalen Scope. Ihre Reihenfolge steht in `scripts/build.mjs` und `test/run-tests.mjs` und muss in beiden gleich sein.
 
 Aufbau:
 
@@ -72,20 +117,21 @@ Aufbau:
 | `src/law.js` | Einkommensteuertarif, Soli, Kinder, Kapitalertragsteuer, Besteuerungsanteil |
 | `src/depot.js` | ETF-Depot mit Tranchen und Altersvorsorgedepot |
 | `src/loans.js` | Annuitätendarlehen |
-| `src/sim.js` | Jahressimulation, Sozialversicherung, gesetzliche Rente |
-| `src/analysis.js` | Maximales Netto, Optimierer, Monte Carlo, Break-even |
+| `src/sim.js` | Simulation in Jahresschritten mit monatsgenauen Zeitpunkten, Sozialversicherung, gesetzliche Rente |
+| `src/analysis.js` | Maximales Netto (auch ewige Rente), Optimierer, Monte Carlo, Break-even |
 | `src/defaults.js` | Beispielhaushalt und Annahmen |
 | `src/ui.js`, `src/page.html` | Oberfläche |
 | `vendor/`, `fonts/` | Apache ECharts und Schriftarten, werden beim Build eingebettet |
+| `docs/` | Screenshots für dieses README |
 
 ## Releases
 
 Releases entstehen automatisch:
 
-1. Version in `package.json` erhöhen, zum Beispiel auf `1.1.0`
+1. Version in `package.json` erhöhen, zum Beispiel auf `1.3.0`
 2. Auf `main` pushen
 
-Der Workflow legt den Tag `v1.1.0` an und hängt die fertige HTML-Datei an das Release. Ein manuell gepushter Tag `v*` funktioniert ebenfalls. Jeder Push auf `main` aktualisiert außerdem die GitHub-Pages-Seite.
+Der Workflow legt den Tag `v1.3.0` an und hängt die fertige HTML-Datei an das Release. Ein manuell gepushter Tag `v*` funktioniert ebenfalls. Jeder Push auf `main` aktualisiert außerdem die GitHub-Pages-Seite.
 
 GitHub Pages einmalig einschalten: Settings → Pages → Source: „GitHub Actions“.
 
