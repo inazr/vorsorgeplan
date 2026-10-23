@@ -18,7 +18,8 @@ let fail = 0, ok = 0;
 // Task 12: Hälftelung AVD ungefördert (Erstattungen fließen in uv): baseB 9401 → 9416, perpetual 7716 → 7730, pkv 9041 → 9054, freiwillig 8480 → 8493, noDraft 9413 → 9426, noIndex 8541 → 8572, kinderlos 9364 → 9386, avdExtra 9143 → 9541,
 // basisSame 8293 → 8305, basisEtf 8624 → 8637, basisNone 8025 → 8039, prvKapital 9332 → 9346, prvKapital61 9318 → 9332, selfRv 9402 → 9417, self 8404 → 8417, saveLast 8935 → 8948, bm7 9330 → 9344, loanTeil 6512 → 6520, baseB_finalReal 167 → 155
 // Task 13: Rentenwert gilt ab 1.7. (Jan-Jun Vorjahreswert), Netto sinkt leicht, baseA 9080 → 9041, baseB 9416 → 9378, perpetual 7730 → 7693, pkv 9054 → 9007, freiwillig 8493 → 8455, noDraft 9426 → 9389, noIndex 8572 → 8542, kinderlos 9386 → 9349, avdNone 9320 → 9283, avdExtra 9541 → 9505, basisSame 8305 → 8270, basisEtf 8637 → 8601, basisNone 8039 → 8002, prvKapital 9346 → 9309, prvKapital61 9332 → 9295, selfRv 9417 → 9379, self 8417 → 8392, saveLast 8948 → 8914, bm7 9344 → 9308, loanTeil 6520 → 6481, baseB_finalReal 155 → 164
-const GOLD = { baseA: 9041, baseB: 9378, perpetual: 7693, pkv: 9007, freiwillig: 8455, noDraft: 9389, noIndex: 8542, kinderlos: 9349, avdNone: 9283, avdExtra: 9505,
+// Task 14: KV-Basis freiwillig ohne 51-€-Abzug, freiwillig 8455 → 8454 (genauer 8454,59 → 8454,10); prvKapital61 unverändert, weil das Depot im Auszahlungsjahr den Sparerpauschbetrag schon verbraucht (pbRest = 0)
+const GOLD = { baseA: 9041, baseB: 9378, perpetual: 7693, pkv: 9007, freiwillig: 8454, noDraft: 9389, noIndex: 8542, kinderlos: 9349, avdNone: 9283, avdExtra: 9505,
   basisSame: 8270, basisEtf: 8601, basisNone: 8002, prvKapital: 9309, prvKapital61: 9295, selfRv: 9379, self: 8392, saveLast: 8914, bm7: 9308, loanTeil: 6481,
   baseB_startReal: 1299706, baseB_finalReal: 164, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
 const check = (name, cond, info = '') => { if (cond) ok++; else { fail++; console.log('FEHLER', name, info); } };
@@ -113,16 +114,21 @@ const v = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS));
   const rB = s.rows.find(r => r.basisPay[0] > 0 && r.year > Math.floor(b.s0 / 12)), rP = s.rows.find(r => r.lump[1] > 0);
   // Ohne Hälftelung (Auszahlung vor 62): Abgeltungsteuer auf 85 % des Ertrags
   const J = JSON.parse(JSON.stringify(I)); J.persons[1].prv.payStart = 61;
+  // Gleicher Fall ohne Freistellungsauftrag: der Sparerpauschbetrag ist vom Depot unberührt und steht der Auszahlung ganz zu
+  const J0 = JSON.parse(JSON.stringify(J)); J0.depot.freistellung = 0;
+  const sJ0 = simulate(J0, ASSUME, { scenario: 'B', targetReal: nB, detail: true }), pJ0 = sJ0.pol[1].prv;
   const sJ = simulate(J, ASSUME, { scenario: 'B', targetReal: nB, detail: true }), pJ = sJ.pol[1].prv;
   return { nA0, nA, nB, d, depleted: s.depleted, refund: s.sumBasisRefund, rentM: b.rentM, rf: I.persons[0].basis.rf, payY: rB && rB.basisPay[0], rk: I.persons[0].basis.rk, dyn: I.persons[0].basis.rentDyn, yr: rB && rB.year - Math.floor(b.s0 / 12),
-    lump: p.lump, gain: p.gain, half: p.half, lumpTax: rP && rP.lumpTax, halfJ: pJ.half, lumpTaxJ: sJ.rows.find(r => r.lump[1] > 0).lumpTax, gainJ: pJ.gain }; })()`);
+    lump: p.lump, gain: p.gain, half: p.half, lumpTax: rP && rP.lumpTax, halfJ: pJ.half, lumpTaxJ: sJ.rows.find(r => r.lump[1] > 0).lumpTax, gainJ: pJ.gain, lumpTaxJ0: sJ0.rows.find(r => r.lump[1] > 0).lumpTax, gainJ0: pJ0.gain, halfJ0: pJ0.half }; })()`);
 check('Versicherungen: Personen-Summen', v.d < 0.01, v.d);
 check('Nur ETF ignoriert Vorsorgeprodukte', near(v.nA, v.nA0, 0.01), `${v.nA} / ${v.nA0}`);
 check('Basisrente: Steuererstattung', v.refund > 1000, v.refund);
 check('Basisrente: Rente aus Rentenfaktor', near(v.payY, v.rentM * 12 * (1 - v.rk) * Math.pow(1 + v.dyn, v.yr), 0.01), `${v.payY}`);
 check('Private RV: Teilkapital 50 %', v.lump > 0 && v.gain > 0 && v.half, JSON.stringify(v));
 check('Private RV: Hälftelung günstiger als Abgeltung', v.lumpTax < v.gain * 0.85 * 0.26375, `${v.lumpTax} / ${v.gain}`);
-check('Private RV: ohne Hälftelung Abgeltungsteuer', !v.halfJ && near(v.lumpTaxJ, v.gainJ * 0.85 * 0.25 * 1.055, 1), `${v.lumpTaxJ} / ${v.gainJ}`);
+// Im Standardfall verbraucht das Depot in diesem Jahr den ganzen Sparerpauschbetrag (pbRest = 0), sonst steht der Rest der Auszahlung zu
+check('Private RV: ohne Hälftelung Abgeltungsteuer (pbRest 0)', !v.halfJ && near(v.lumpTaxJ, Math.max(0, v.gainJ * 0.85 - 0) * 0.25 * 1.055, 1), `${v.lumpTaxJ} / ${v.gainJ}`);
+check('Private RV: ohne Hälftelung Sparerpauschbetrag (prvKapital61)', !v.halfJ0 && near(v.lumpTaxJ0, Math.max(0, v.gainJ0 * 0.85 - g('LAW.sparerPB')) * 0.25 * 1.055, 1), `${v.lumpTaxJ0} / ${v.gainJ0}`);
 
 // 9. Beiträge über dem Budget werden gekürzt, das ETF-Depot bekommt dann nichts aus dem Budget
 const c = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS)); I.budget.monthly = 200;
@@ -269,6 +275,7 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('tariffFor 2035: Index ab 2028', near(E.tariffFor(2035, ix).idx, Math.pow(1.02, 7), 1e-12) && E.tariffFor(2035, ix).p === E.LAW.tariff[2028]);
   check('tariffFor 2027 ohne Entwurf: Tarif 2026', E.tariffFor(2027, { ...ix, useDraft: false }).p === E.LAW.tariff[2026]);
   check('tariffFor ohne Indexierung: Faktor 1', E.tariffFor(2035, { ...ix, indexTariff: false }).idx === 1);
+  check('idxVal liest { v, st } als Zahl', E.idxVal({ 2026: 100, 2027: { v: 110, st: 'E' } }, 2027, 0) === 110 && near(E.idxVal({ 2026: 100, 2027: { v: 110, st: 'E' } }, 2028, 0.1), 121, 1e-9));
   check('idxVal bbgRV 2030', near(E.idxVal(E.SV.bbgRV, 2030, 0.03), 106200 * Math.pow(1.03, 3), 1e-6));
   const lt = { 2026: 1, 2027: { v: 2, st: 'E' } };
   check('lawPick ohne Entwurf: 2026', E.lawPick(lt, 2030, false).v === 1 && E.lawPick(lt, 2030, false).y === 2026);

@@ -3,10 +3,11 @@
 // ═══════════════════════════════════════════════════════════════
 const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohnentwicklung
   kgAbzug: 0.04,                             // Abschlag bei Anspruch auf Krankengeld, § 10 Abs. 1 Nr. 3 S. 4 EStG
-  bbgRV: { 2026: 101400, 2027: 106200 },
-  bbgKV: { 2026: 69750, 2027: 76500 },       // 2027 inkl. Sonderanhebung BStabG
-  de: { 2026: 51944, 2027: 53452 },          // Durchschnittsentgelt (vorläufig)
-  bez: { 2026: 47460, 2027: 49560 },         // Bezugsgröße p.a.
+  // 2027: Kabinett 7.10.2026, Bundesrat ausstehend (Status E)
+  bbgRV: { 2026: 101400, 2027: { v: 106200, st: 'E' } },
+  bbgKV: { 2026: 69750, 2027: { v: 76500, st: 'E' } },       // 2027 inkl. Sonderanhebung BStabG
+  de: { 2026: 51944, 2027: { v: 53452, st: 'E' } },          // Durchschnittsentgelt (vorläufig)
+  bez: { 2026: 47460, 2027: { v: 49560, st: 'E' } },         // Bezugsgröße p.a.
   rw: { 2025: 40.79, 2026: 42.52 },          // aktueller Rentenwert ab 1.7.
   rvAN: 0.093, kvGen: 0.146, kvErm: 0.140, pv: 0.036, pvKinderlos: 0.006,
   halteBis: 2031,                            // Ende der Haltelinie 48 %, danach Rentendämpfung
@@ -77,14 +78,14 @@ function kapTax(kapTaxable, lossCarry, L, zvEOther, nKids, A, pb = LAW.sparerPB)
   let base = kapTaxable - lossCarry;
   let newLoss = 0;
   if (base < 0) { newLoss = -base; base = 0; }
-  const afterSPB = Math.max(0, base - Math.min(pb, LAW.sparerPB));
+  const pbUsed = Math.min(Math.min(pb, LAW.sparerPB), base), afterSPB = Math.max(0, base - Math.min(pb, LAW.sparerPB));   // pbUsed: vom Depot verbrauchter Teil des Pauschbetrags
   const abg = afterSPB * LAW.abgSt * (1 + LAW.soliKap);
   let tax = abg, guenstiger = false;
   if (A.guenstiger && afterSPB > 0) {
     const t0 = incomeTax(zvEOther, nKids, L).total, t1 = incomeTax(zvEOther + afterSPB, nKids, L).total;
     if (t1 - t0 < abg) { tax = t1 - t0; guenstiger = true; }
   }
-  return { tax, newLoss, afterSPB, guenstiger };
+  return { tax, newLoss, afterSPB, guenstiger, pbUsed };
 }
 
 // ─── Personen-Helfer ───
@@ -403,7 +404,7 @@ function simulate(I, A, opt) {
         if (!kv[i].ok) {
           const rest = Math.max(0, bbg - bR);
           // Freiwillig: Beiträge auch auf Versicherungsrenten (voller Zahlbetrag) und Kapitalauszahlungen
-          const sonst = Math.max(0, avdPay[i].gross + polGross[i] + lumpKV[i] + kapPerPerson * f - 51 * f);
+          const sonst = Math.max(0, avdPay[i].gross + polGross[i] + lumpKV[i] + kapPerPerson * f);
           const bS = Math.min(sonst, rest);
           const fehl = Math.max(0, L.bez / 3 * f - bR - bS);   // Mindestbemessung
           c += (bS + fehl) * (SV.kvErm + L.zus + pvRate);
@@ -486,11 +487,14 @@ function simulate(I, A, opt) {
     if (dedSum > 0) refund = Math.max(0, tBasis - incomeTax(Math.max(0, ev.zvE - basisDed - dedSum), nKids, L).total - zulSum);
     // Kapitalauszahlung private RV: Ertrag nach 15 % Teilfreistellung, bei 12 Jahren und ab 62 zur Hälfte mit persönlichem Steuersatz,
     // sonst Abgeltungsteuer. Der Nettobetrag wird ins ETF-Depot angelegt.
-    let zvLump = ev.zvE, lumpNet = 0, lumpTax = 0;
+    // Ohne Hälftelung steht der Rest des Sparerpauschbetrags (nach dem Depot und früheren Auszahlungen) zu.
+    let zvLump = ev.zvE, lumpNet = 0, lumpTax = 0, pbCons = 0;
     const lumpTaxPer = persons.map(() => 0), lumpPer = persons.map(() => 0);
     for (const l of lumps) {
       const tx = l.gain * (1 - INS.fondsFrei) * (l.half ? 0.5 : 1);
-      const t = l.half ? incomeTax(zvLump + tx, nKids, L).total - incomeTax(zvLump, nKids, L).total : tx * LAW.abgSt * (1 + LAW.soliKap);
+      const pbRest = l.half ? 0 : Math.max(0, LAW.sparerPB - ev.kt.pbUsed - pbCons);
+      if (!l.half) pbCons += Math.min(pbRest, tx);
+      const t = l.half ? incomeTax(zvLump + tx, nKids, L).total - incomeTax(zvLump, nKids, L).total : Math.max(0, tx - pbRest) * LAW.abgSt * (1 + LAW.soliKap);
       if (l.half) zvLump += tx;
       lumpTax += t; lumpNet += l.amt - t; lumpTaxPer[l.i] += t; lumpPer[l.i] += l.amt;
     }

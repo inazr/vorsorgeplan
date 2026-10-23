@@ -90,8 +90,10 @@ Gerechnet wird monatsgenau für einen Haushalt mit zwei Personen, von heute bis 
 | Private Rentenversicherung | Ertragsanteil, Hälftelung ab 62 nach 12 Jahren, 15 % Teilfreistellung | Gesetz |
 | Rentenbesteuerung | Besteuerungsanteil nach Wachstumschancengesetz | Gesetz |
 | Kapitalerträge | Abgeltungsteuer, Teilfreistellung, Vorabpauschale mit Basiszins 3,20 % (2026) | Gesetz |
-| Gesetzliche Rente | Rentenwert 42,52 € ab 01.07.2026, Haltelinie bis 2031, danach Dämpfung (einstellbar) | Gesetz / Annahme |
-| Krankenversicherung | BBG 2026/2027, Zusatzbeitrag 2,9 % mit einstellbarem Anstieg | Gesetz / Annahme |
+| Gesetzliche Rente | Rentenwert 42,52 € ab 01.07.2026, BBG 2026 101.400 €, Haltelinie bis 2031, danach Dämpfung (einstellbar) | Gesetz / Annahme |
+| Gesetzliche Rente, SV-Werte 2027 | BBG, Durchschnittsentgelt, Bezugsgröße nach Kabinettsbeschluss vom 7.10.2026, Bundesrat ausstehend | Entwurf |
+| Krankenversicherung | BBG 2026 69.750 €, Zusatzbeitrag 2,9 % mit einstellbarem Anstieg | Gesetz / Annahme |
+| Krankenversicherung 2027 | BBG 76.500 € (inkl. Sonderanhebung), Kabinett 7.10.2026, Bundesrat ausstehend | Entwurf |
 
 Annahmen der Rechnung:
 - Steuern und Sozialversicherung werden jährlich berechnet, alle Zeitpunkte (Rentenbeginn, Sparende, Auszahlungen, Kinder) monatsgenau. In angebrochenen Jahren werden Rente, Steuer und Beiträge anteilig auf die Entnahmemonate verteilt.
