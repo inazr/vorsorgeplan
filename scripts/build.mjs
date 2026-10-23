@@ -26,20 +26,30 @@ const fonts = [
 const safe = js => js.replace(/<\/script/gi, '<\\/script');
 const head = `<style>\n${fonts}\n</style>\n<script>\n${safe(rd('vendor/echarts.min.js'))}\n</script>`;
 
-let page = rd('src/page.html')
-  .replace('{{HEAD}}', () => head)
-  .replaceAll('{{TITLE}}', 'Vorsorgeplan')
-  .replace('<meta name="claude:viewport-fit-sides" content="cover">\n', '')
-  .replace('/*ENGINE*/', () => safe(engine))
-  .replace('/*UI*/', () => safe(rd('src/ui.js')))
-  .replace('keine Steuer- oder Anlageberatung</div>', () => `keine Steuer- oder Anlageberatung · Version ${version}</div>`);
+// Ersetzt needle genau einmal durch repl (String oder Funktion, damit $-Muster im Code nicht greifen).
+// Fehlt needle, bricht der Build ab, statt eine kaputte Seite auszuliefern.
+const sub = (page, needle, repl) => {
+  if (!page.includes(needle)) throw new Error('Platzhalter fehlt: ' + needle);
+  return page.replace(needle, typeof repl === 'function' ? repl : () => repl);
+};
+
+// Kleine Platzhalter zuerst, Engine und UI zuletzt: so trifft nie eingebetteter Code einen Platzhalter.
+let page = rd('src/page.html');
+if (!page.includes('{{TITLE}}')) throw new Error('Platzhalter fehlt: {{TITLE}}');
+page = page.replaceAll('{{TITLE}}', 'Vorsorgeplan');
+page = sub(page, '<meta name="claude:viewport-fit-sides" content="cover">\n', '');
+page = sub(page, '{{VERSION}}', version);
+page = sub(page, '<header class="top">', '</head>\n<body>\n<header class="top">');
+page = sub(page, '{{HEAD}}', head);
+page = sub(page, '/*ENGINE*/', safe(engine));
+page = sub(page, '/*UI*/', safe(rd('src/ui.js')));
 
 const html = `<!doctype html>
 <html lang="de">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-${page.replace('<header class="top">', '</head>\n<body>\n<header class="top">')}
+${page}
 </body>
 </html>
 `;
