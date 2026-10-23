@@ -6,7 +6,7 @@ import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ctx = vm.createContext({ console, Math, JSON });
-const ENGINE_FILES = ['law', 'depot', 'insurance', 'loans', 'sim', 'defaults', 'analysis'];
+const ENGINE_FILES = ['law', 'depot', 'insurance', 'loans', 'sim', 'defaults', 'state', 'analysis'];
 for (const f of ENGINE_FILES)
   vm.runInContext(readFileSync(join(root, 'src', f + '.js'), 'utf8'), ctx);
 const g = code => vm.runInContext(code, ctx);
@@ -285,6 +285,17 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   const res = await new Promise(resolve => E2.monteCarlo(I, A, { runs: 3, seed: 1 }, null, resolve));
   check('monteCarlo: Ergebnis je Pfad und Variante', res.runs === 3 && res.res.A.length === 3 && res.res.B.length === 3 && res.fan.A.length === 3 && res.keys.join() === 'A,B', JSON.stringify(res.keys));
   check('monteCarlo: Jahre und Fehlerzähler', res.years[0] === I.startYear && res.fan.A[0].length === res.years.length && res.fail.A >= 0 && res.det.B > res.det.A);
+}
+
+// 21. Zustands-Helfer (state.js): esc, loadState, conform
+{
+  check('esc: Sonderzeichen', g(`esc('<a href="x">\\'&')`) === '&lt;a href=&quot;x&quot;&gt;&#39;&amp;', g(`esc('<a href="x">\\'&')`));
+  const L = g(`loadState({ I: { persons: [{ avd: { kinderzulage: true } }], budget: { monthly: '1200' } }, A: { optMode: 'xyz' } })`);
+  check('loadState: Zahl aus Text', L.I.budget.monthly === 1200, String(L.I.budget.monthly));
+  check('loadState: ungültige Auswahl fällt auf Standard', L.A.optMode === 'fast', String(L.A.optMode));
+  check('loadState: fehlende Felder aus Standardwerten', L.I.persons[0].avd.eigen === 1800, String(L.I.persons[0].avd.eigen));
+  check('loadState: Kinder-Zulageempfänger ergänzt', L.I.children[0].zulageTo === 0, String(L.I.children[0]?.zulageTo));
+  check('loadState({}) entspricht den Standardwerten', JSON.stringify(g('loadState({})')) === JSON.stringify({ I: g('DEFAULTS'), A: g('ASSUME') }));
 }
 
 console.log(`${ok} Prüfungen bestanden, ${fail} fehlgeschlagen`);
