@@ -48,7 +48,12 @@ let OPT = null, OPT_RUN = null;
 // Ergebnisse: A = nur ETF-Depot, B = deine Aufteilung, O = Optimum
 const SCN = { A: 'Nur ETF-Depot', B: 'Deine Aufteilung', O: 'Optimum' };
 const SCN_C = { A: '--sA', B: '--s2', O: '--s1' };
-const PROD = { avd: 'Altersvorsorgedepot', basis: 'Basisrente', prv: 'Private Rentenversicherung' };
+const PROD = { avd: { name: 'Altersvorsorgedepot', short: 'AVD' }, basis: { name: 'Basisrente', short: 'Basisrente' }, prv: { name: 'Private Rentenversicherung', short: 'private RV' } };
+const fact = (l, v) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+const FUND_C = ['--s1', '--s2', '--s3', '--s4', '--s5'];
+const dv = (r, v) => chartReal ? v / r.priceIdx : v;
+const realLabel = () => chartReal ? 'in heutiger Kaufkraft' : 'nominal';
+const commit = () => { save(); renderPanels(); scheduleRecalc(); };
 // Fingerabdruck ohne Produkt-Einstellungen: ändert er sich, ist das Optimum veraltet
 function optSig() { const I = clone(ST.I); I.persons.forEach(p => { delete p.avd; delete p.basis; delete p.prv; }); return JSON.stringify([I, ST.A, ST.A.optMode, ST.A.optQ]); }
 const simOf = k => R && R['sim' + k];
@@ -103,7 +108,7 @@ function renderKPIs() {
   const ws = R.simB.wStartYear;
   const wealth = k => { const r = rowAt(simOf(k), ws - 1); return r ? r.netWorth / r.priceIdx : 0; };
   const stale = OPT && OPT.sig !== optSig();
-  const used = prodList(I).map(k => k === 'prv' ? 'private RV' : k === 'avd' ? 'AVD' : PROD[k]);
+  const used = prodList(I).map(k => PROD[k].short);
   const optSub = () => {
     if (!OPT) return 'noch nicht berechnet · Optimierer im Reiter Strategie';
     const tag = stale ? '<span class="pill warn">veraltet</span> ' : '';
@@ -136,7 +141,7 @@ function renderKPIs() {
 }
 // Kurzbeschreibung einer Produkt-Aufteilung
 function optLabel(patch) {
-  const parts = Object.keys(PROD).filter(k => patch.some(p => prodUsed(p, k))).map(k => k === 'avd' ? 'AVD' : k === 'prv' ? 'private RV' : PROD[k]);
+  const parts = Object.keys(PROD).filter(k => patch.some(p => prodUsed(p, k))).map(k => PROD[k].short);
   return parts.length ? parts.join(' · ') : 'nur ETF';
 }
 function kpi(l, v, d, sw, b) { return `<div class="kpi${b ? ' b' : ''}"><div class="l">${sw ? `<span class="sw" style="background:var(--${sw})"></span>` : ''}${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`; }
@@ -240,14 +245,14 @@ function renderP0() {
       <p class="note">Kinder zählen für Kinderfreibetrag und Kindergeld, die Kinderzulage im Altersvorsorgedepot (300 € je Kind, solange Kindergeld fließt), den Abschlag in der Pflegeversicherung ab dem 2. Kind unter 25 und die 9/10-Regel (3 Jahre je Kind). Die Kinderzulage braucht beim jeweiligen Elternteil mindestens so viel Eigenbeitrag, wie sie hoch ist. Ab 2028 folgt sie gesetzlich dem Kindergeldbezug, wenn ihr nichts anderes erklärt. Die Frühstart-Rente ist nicht eingerechnet.</p>
     </div>
   </div>`;
-  $('#btn-kid-add').onclick = () => { ST.I.children.push({ name: 'Kind ' + (ST.I.children.length + 1), by: 2027, bm: 1, kgUntil: 18, zulageTo: 1 }); save(); renderPanels(); scheduleRecalc(); };
-  $$('[data-kid-del]').forEach(b => b.onclick = () => { ST.I.children.splice(+b.dataset.kidDel, 1); save(); renderPanels(); scheduleRecalc(); });
+  $('#btn-kid-add').onclick = () => { ST.I.children.push({ name: 'Kind ' + (ST.I.children.length + 1), by: 2027, bm: 1, kgUntil: 18, zulageTo: 1 }); commit(); };
+  $$('[data-kid-del]').forEach(b => b.onclick = () => { ST.I.children.splice(+b.dataset.kidDel, 1); commit(); });
   $('#btn-loan-add').onclick = () => {
     const y = Math.max(ST.I.startYear, 2026);
     ST.I.loans.push({ ...loanTpl(y), name: 'Darlehen ' + (ST.I.loans.length + 1) });
-    save(); renderPanels(); scheduleRecalc();
+    commit();
   };
-  $$('[data-loan-del]').forEach(b => b.onclick = () => { ST.I.loans.splice(+b.dataset.loanDel, 1); save(); renderPanels(); scheduleRecalc(); });
+  $$('[data-loan-del]').forEach(b => b.onclick = () => { ST.I.loans.splice(+b.dataset.loanDel, 1); commit(); });
   if ($('#btn-be')) $('#btn-be').onclick = () => {
     const b = $('#btn-be'); b.disabled = true; $('#be-out').textContent = 'rechnet…';
     setTimeout(() => {
@@ -275,7 +280,7 @@ function renderFacts() {
       ['Entgeltpunkte', epTot.toLocaleString('de-DE', { maximumFractionDigits: 1 })],
       ['Rente brutto ' + (row?.year ?? ''), eur(monthly) + '/M.'],
       ['in heutiger Kaufkraft', eur(row ? monthly / row.priceIdx : 0) + '/M.'],
-    ].map(([l, v]) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('')
+    ].map(([l, v]) => fact(l, v)).join('')
       + `<div class="fact" style="grid-column:1/-1"><div class="l">Krankenversicherung im Alter</div><div class="v">${kv.pkv
         ? (() => { const rr = R.simB.rows.find(r => r.year > y) || row; const kvm = rr ? rr.pp[i].kv / 12 : 0;
             return `<span class="pill info">Privat · keine Beiträge auf Kapitalerträge</span> <span class="muted" style="font-family:var(--font-ui);font-size:11px">Eigenanteil ${rr?.year ?? ''} nach Zuschuss der Rentenversicherung: ${eur(kvm)}/M., heutige Kaufkraft ${eur(rr ? kvm / rr.priceIdx : 0)}/M.</span>`; })()
@@ -293,7 +298,7 @@ function renderFacts() {
       [c.after === 'etf' ? 'Ablösung aus Depot' : 'Anschlussrate', c.after === 'etf' ? eur(pv.payoff) : eur(pv.postRate) + '/M.'],
       ['Schuldenfrei', pv.end != null ? MON[pv.end % 12] + ' ' + Math.floor(pv.end / 12) : '–'],
       ['Zinsen gesamt', eur(pv.interestTotal)],
-    ].map(([l, v]) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+    ].map(([l, v]) => fact(l, v)).join('');
   });
   const li = $('#loan-info');
   if (li) {
@@ -318,10 +323,9 @@ function renderFacts() {
       ['Förderquote auf Eigenbeitrag', cF > 0 ? pc(zul / cF, 0) : '–'],
       ['Kapital bei Auszahlung', before ? keur(before.avd[i] / before.priceIdx) : '–'],
       ['Erste Auszahlung', startRow ? eur(startRow.avdPay[i] / 12 / startRow.priceIdx) + '/M.' : '–'],
-    ].map(([l, v]) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
+    ].map(([l, v]) => fact(l, v)).join('');
   });
   // Basisrente und private RV
-  const fact = (l, v) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`;
   I.persons.forEach((P, i) => POLICIES.forEach(k => {
     const el = $(`#${k}facts-${i}`); if (!el) return;
     const st = R.simB.pol[i][k], cfg = P[k];
@@ -438,9 +442,8 @@ function prvCard(i) {
 }
 function fundsHtml() {
   const D = ST.I.depot;
-  const cols = ['--s1', '--s2', '--s3', '--s4', '--s5'];
   return D.funds.map((f, k) => `<div class="fund">
-    <div class="fund-h"><span class="dot" style="background:var(${cols[k]})"></span>Fonds ${k + 1}</div>
+    <div class="fund-h"><span class="dot" style="background:var(${FUND_C[k]})"></span>Fonds ${k + 1}</div>
     <div class="fields three">
       ${T(`I.depot.funds.${k}.name`, 'Name')}
       ${S(`I.depot.funds.${k}.type`, 'Art', [['acc', 'Thesaurierend'], ['dist', 'Ausschüttend']], { rr: 1 })}
@@ -559,10 +562,10 @@ function renderP1() {
   <details class="card"><summary>Rechtsstand und Quellen</summary>${legalTable()}
     <p class="note">Offen sind vor allem die Krankenversicherung auf Auszahlungen des Altersvorsorgedepots bei freiwillig Versicherten, der Tarif ab 2029 und der Zusatzbeitrag bis 2080. Das Gesetz zum Altersvorsorgedepot ist verkündet (BGBl. 2026 I Nr. 156), ein Produkt war im Oktober 2026 noch nicht zertifiziert.</p>
   </details>`;
-  $('#btn-split').onclick = () => { autoSplit(); renderPanels(); scheduleRecalc(); save(); };
+  $('#btn-split').onclick = () => { autoSplit(); commit(); };
   $('#btn-opt').onclick = runOptimizer;
   $('#btn-opt-stop').onclick = () => { if (OPT_RUN) OPT_RUN.cancel(); OPT_RUN = null; $('#btn-opt').disabled = false; $('#btn-opt-stop').hidden = true; $('#opt-out').innerHTML = '<p class="muted">Abgebrochen.</p>'; };
-  $$('[data-preset]').forEach(b => b.onclick = () => { const [path, k] = b.dataset.preset.split('|'); Object.assign(getP(path), INS_PRESETS[k]); save(); renderPanels(); scheduleRecalc(); });
+  $$('[data-preset]').forEach(b => b.onclick = () => { const [path, k] = b.dataset.preset.split('|'); Object.assign(getP(path), INS_PRESETS[k]); commit(); });
   if (OPT_RUN) { $('#btn-opt').disabled = true; $('#btn-opt-stop').hidden = false; }
   if (OPT) renderOptResult();
 }
@@ -635,7 +638,7 @@ function renderOptResult() {
     const keys = Object.keys(OPT_LAB[k]).filter(f => f === 'on' || (uC || uO) && (OPT_AMOUNT[k].includes(f) || uO));
     keys.forEach(f => {
       const o = f === 'on' ? prodUsed(p, k) : cur[f], v = f === 'on' ? prodUsed({ [k]: opt }, k) : opt[f];
-      rows.push(`<tr><td>${esc(p.name)}</td><td class="txt">${PROD[k]}</td><td class="txt">${OPT_LAB[k][f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
+      rows.push(`<tr><td>${esc(p.name)}</td><td class="txt">${PROD[k].name}</td><td class="txt">${OPT_LAB[k][f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
     });
   }));
   const d = (R.netO ?? 0) - (R.netB ?? 0);
@@ -691,18 +694,12 @@ function renderP2() {
 
 // Werte je Zeile für Haushalt oder eine Person
 const sum = a => a.reduce((x, y) => x + y, 0);
-const PERS_ARR = ['basis', 'prv', 'basisIn', 'prvIn', 'basisPay', 'prvPay', 'basisPayW', 'prvPayW', 'lump'];
+const PERS_ARR = ['basis', 'prv', 'basisIn', 'prvIn', 'basisPay', 'prvPay', 'basisPayW', 'prvPayW', 'lump', 'avd', 'avdIn', 'grv', 'avdPay', 'grvW', 'avdPayW'];
 function V(r, k, who = chartPerson) {
   if (who >= 0) return r.pp[who][k];
   if (PERS_ARR.includes(k)) return sum(r[k]);
   switch (k) {
-    case 'avd': return sum(r.avd);
-    case 'avdIn': return sum(r.avdIn);
     case 'zul': return r.zulagen;
-    case 'grv': return sum(r.grv);
-    case 'avdPay': return sum(r.avdPay);
-    case 'grvW': return sum(r.grvW);
-    case 'avdPayW': return sum(r.avdPayW);
     case 'est': return r.est + r.soli;
     default: return r[k];
   }
@@ -740,7 +737,6 @@ function renderWho(sim) {
   const r = sim.rows.find(x => x.year === ws), rb = sim.rows.find(x => x.year === sim.wStartYear - 1);
   if (!r) { $('#who').innerHTML = ''; return; }
   const P = ST.I.persons, n = P.length;
-  const dv = (row, v) => chartReal ? v / row.priceIdx : v;
   const m = v => eur(dv(r, v) / 12);
   const save = sim.rows.filter(x => x.saveMonths > 0);
   const tot = (k, who) => sum(save.map(x => V(x, k, who)));
@@ -772,7 +768,6 @@ function renderCharts() {
   if (!R) return;
   if (chartScen === 'O' && !R.simO) chartScen = 'B';
   const sim = simOf(chartScen), others = ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k));
-  const dv = (r, v) => chartReal ? v / r.priceIdx : v;
   const C1 = cssv('--s1'), C2 = cssv('--s2'), C3 = cssv('--s3'), C4 = cssv('--s4'), C5 = cssv('--s5'), C6 = cssv('--s6'), C7 = cssv('--s7'), C8 = cssv('--s8'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
   const years = sim.rows.map(r => r.year);
   // Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
@@ -787,7 +782,7 @@ function renderCharts() {
   const bar = (name, data, color, stack = 's') => ({ name, type: 'bar', stack, data, itemStyle: { color, borderColor: surf, borderWidth: 1, borderRadius: 0 }, barMaxWidth: 18, emphasis: { focus: 'series' } });
   const ws = sim.wStartYear;
   const who = chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt';
-  $('#wealth-sub').textContent = `${who} · Entnahme ab ${ws} · ${chartReal ? 'in heutiger Kaufkraft' : 'nominal'}`;
+  $('#wealth-sub').textContent = `${who} · Entnahme ab ${ws} · ${realLabel()}`;
   renderWho(sim);
 
   // Vermögen
@@ -805,10 +800,10 @@ function renderCharts() {
   }), true);
 
   // Kapital je ETF-Sparplan
-  const FC = ['--s1', '--s2', '--s3', '--s4', '--s5'].map(cssv);
+  const FC = FUND_C.map(cssv);
   const share = chartPerson >= 0 ? 1 / ST.I.persons.length : 1;
   const fundsCfg = ST.I.depot.funds;
-  $('#funds-sub').textContent = `${who} · ${chartPerson >= 0 ? 'Hälfte des gemeinsamen Depots · ' : ''}${chartReal ? 'in heutiger Kaufkraft' : 'nominal'}`;
+  $('#funds-sub').textContent = `${who} · ${chartPerson >= 0 ? 'Hälfte des gemeinsamen Depots · ' : ''}${realLabel()}`;
   chartOf('ch-funds').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: years },
     tooltip: { ...baseOpt().tooltip, formatter: ps => {
@@ -825,7 +820,7 @@ function renderCharts() {
     const P = ST.I.persons, PPC = [cssv('--s1'), cssv('--s2')];
     const k = chartScen === 'A' ? 'B' : chartScen, avdSim = simOf(k);   // nur ETF hat keine Vorsorgeprodukte
     const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
-    $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${chartReal ? 'in heutiger Kaufkraft' : 'nominal'}`;
+    $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${realLabel()}`;
     let cum = 0;
     const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => a + r.pp[i].avdIn + r.pp[i].zul + r.pp[i].basisIn + r.pp[i].prvIn, 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
     chartOf('ch-avd').setOption(baseOpt({
@@ -895,7 +890,6 @@ function renderCharts() {
 }
 
 function renderTable(sim) {
-  const dv = (r, v) => chartReal ? v / r.priceIdx : v;
   const e = (r, k) => eur(dv(r, V(r, k)));
   const cols = [
     ['Jahr', r => r.year], ['Phase', r => r.phase], ['Alter', r => chartPerson >= 0 ? r.ages[chartPerson] : r.ages.join(' / ')],
