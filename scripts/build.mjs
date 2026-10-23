@@ -9,7 +9,7 @@ const rd = p => readFileSync(join(root, p), 'utf8');
 const pkg = JSON.parse(rd('package.json'));
 const version = process.env.VERSION || pkg.version;
 
-const ENGINE = ['law', 'depot', 'loans', 'sim', 'defaults', 'analysis'];
+const ENGINE = ['law', 'depot', 'insurance', 'loans', 'sim', 'defaults', 'analysis'];
 const engine = ENGINE.map(f => rd(`src/${f}.js`)).join('\n');
 
 const fonts = [

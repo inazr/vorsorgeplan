@@ -52,6 +52,17 @@ const monOpts = MON.map((m, i) => [i + 1, m]);
 
 // ─── Zustand und Neuberechnung ───
 let R = null, tab = 0, chartScen = 'B', chartReal = true, chartPerson = -1, recalcT = null, MC = null;
+// Optimum aus dem letzten Optimierer-Lauf (nur im Speicher): Produkt-Einstellungen je Person und Fingerabdruck der übrigen Eingaben
+let OPT = null, OPT_RUN = null;
+// Ergebnisse: A = nur ETF-Depot, B = deine Aufteilung, O = Optimum
+const SCN = { A: 'Nur ETF-Depot', B: 'Deine Aufteilung', O: 'Optimum' };
+const SCN_C = { A: '--sA', B: '--s2', O: '--s1' };
+const PROD = { avd: 'Altersvorsorgedepot', basis: 'Basisrente', prv: 'Private Rentenversicherung' };
+// Fingerabdruck ohne Produkt-Einstellungen: ändert er sich, ist das Optimum veraltet
+function optSig() { const I = clone(ST.I); I.persons.forEach(p => { delete p.avd; delete p.basis; delete p.prv; }); return JSON.stringify([I, ST.A, ST.A.optMode, ST.A.optQ]); }
+const simOf = k => R && R['sim' + k];
+const prodUsed = (p, k) => p[k]?.on && (k === 'avd' ? p.avd.eigen + p.avd.extra > 0 : p[k].beitrag > 0);
+const prodList = I => Object.keys(PROD).filter(k => I.persons.some(p => prodUsed(p, k)));
 function readInput(el) {
   const t = el.dataset.t;
   if (t === 'bool') return el.checked;
@@ -79,15 +90,20 @@ function recalc() {
   const { I, A } = ST;
   const t0 = performance.now();
   const out = {};
+  if (OPT) out.IO = applyPatch(I, OPT.patch);
   if (I.withdraw.strategy !== 'fixedNet') {
     out.netA = maxNet(I, A, 'A');
     out.netB = maxNet(I, A, 'B', null, out.netA);
+    if (OPT) out.netO = maxNet(out.IO, A, 'B', null, out.netB);
   }
   out.simA = simulate(I, A, { scenario: 'A', targetReal: out.netA || 0, detail: true });
   out.simB = simulate(I, A, { scenario: 'B', targetReal: out.netB || 0, detail: true });
+  if (OPT) out.simO = simulate(out.IO, A, { scenario: 'B', targetReal: out.netO || 0, detail: true });
   out.ms = performance.now() - t0;
   R = out;
   renderKPIs(); renderFacts();
+  const ob = $('#seg-scen button[data-v="O"]');
+  if (ob) { ob.disabled = !OPT; if (OPT) ob.removeAttribute('title'); }
   if (tab === 2) renderCharts();
 }
 
@@ -95,26 +111,44 @@ function recalc() {
 function rowAt(sim, y) { return sim.rows.find(r => r.year === y); }
 function renderKPIs() {
   const { I } = ST;
-  const sA = R.simA, sB = R.simB;
-  const ws = sB.wStartYear;
-  const rA = rowAt(sA, ws - 1), rB = rowAt(sB, ws - 1);
-  const wA = rA ? rA.netWorth / rA.priceIdx : 0, wB = rB ? rB.netWorth / rB.priceIdx : 0;
+  const ws = R.simB.wStartYear;
+  const wealth = k => { const r = rowAt(simOf(k), ws - 1); return r ? r.netWorth / r.priceIdx : 0; };
+  const stale = OPT && OPT.sig !== optSig();
+  const used = prodList(I).map(k => k === 'prv' ? 'private RV' : k === 'avd' ? 'AVD' : PROD[k]);
+  const optSub = () => {
+    if (!OPT) return 'noch nicht berechnet · Optimierer im Reiter Strategie';
+    const tag = stale ? '<span class="pill warn">veraltet</span> ' : '';
+    const mc = OPT.info.mode === 'mc' ? ` · ${pc(1 - OPT.info.q, 0)} der Verläufe: ${eur(OPT.info.pct)}` : '';
+    return tag + optLabel(OPT.patch) + mc;
+  };
   let html = '';
   if (I.withdraw.strategy !== 'fixedNet') {
     const perp = I.withdraw.strategy === 'perpetual';
-    const d = R.netB - R.netA;
-    const sub = perp ? 'Netto heute, Kapital bleibt real erhalten' : 'Netto in heutiger Kaufkraft';
-    html += kpi('Nur ETF-Depot (A)', eur(R.netA) + '/Monat', sub, 'sA');
-    html += kpi('Mit Altersvorsorgedepot (B)', eur(R.netB) + '/Monat', sub, 's2', true);
-    html += kpi('Vorteil B gegenüber A', (d >= 0 ? '+' : '') + eur(d) + '/Monat', (d >= 0 ? '+' : '') + pc(d / R.netA) + ' · bis ' + (I.persons[I.withdraw.refPerson].name) + ' ' + I.withdraw.targetAge);
+    const sub = perp ? 'Kapital bleibt real erhalten' : 'Netto in heutiger Kaufkraft';
+    // Bestes Ergebnis: bei fester Rendite nach Netto, nach einem Monte-Carlo-Lauf nach dem Perzentil
+    const mcRun = OPT && OPT.info.mode === 'mc' && !stale;
+    const nets = mcRun ? { A: OPT.info.pctA, B: OPT.info.pctB, O: OPT.info.pct } : { A: R.netA, B: R.netB, ...(OPT ? { O: R.netO } : {}) };
+    const best = Object.keys(nets).reduce((a, k) => nets[k] > nets[a] + 0.5 ? k : a, 'B');
+    const mark = k => k === best ? ' <span class="pill good">bestes</span>' : '';
+    const dB = R.netB - R.netA;
+    html += kpi(SCN.A + mark('A'), eur(R.netA) + '/Monat', sub, 'sA');
+    html += kpi(SCN.B + mark('B'), eur(R.netB) + '/Monat', (used.length ? used.join(' · ') : 'keine Vorsorgeprodukte') + ` · ${dB >= 0 ? '+' : ''}${eur(dB)} gg. ETF`, 's2', true);
+    html += OPT ? kpi(SCN.O + mark('O'), eur(R.netO) + '/Monat', `${R.netO - R.netB >= 0 ? '+' : ''}${eur(R.netO - R.netB)} gg. deiner Aufteilung · ` + optSub(), 's1')
+      : kpi(SCN.O, '–', optSub(), 's1');
   } else {
-    const yA = sA.depletedYear, yB = sB.depletedYear;
-    html += kpi('Kapital reicht (A)', yA ? 'bis ' + (yA - 1) : 'bis Zielalter', yA ? 'danach fehlen Mittel' : 'Endvermögen ' + keur(sA.final), 'sA');
-    html += kpi('Kapital reicht (B)', yB ? 'bis ' + (yB - 1) : 'bis Zielalter', yB ? 'danach fehlen Mittel' : 'Endvermögen ' + keur(sB.final), 's2', true);
-    html += kpi('Wunsch-Netto', eur(I.withdraw.fixedNet) + '/Monat', I.withdraw.fixedIndexed ? 'mit Inflation angepasst' : 'nominal fest');
+    const reach = k => { const s = simOf(k); return s.depletedYear ? 'bis ' + (s.depletedYear - 1) : 'bis Zielalter'; };
+    const rsub = k => { const s = simOf(k); return s.depletedYear ? 'danach fehlen Mittel' : 'Endvermögen ' + keur(s.final); };
+    html += kpi('Kapital reicht · ' + SCN.A, reach('A'), rsub('A'), 'sA');
+    html += kpi('Kapital reicht · ' + SCN.B, reach('B'), rsub('B'), 's2', true);
+    html += OPT ? kpi('Kapital reicht · ' + SCN.O, reach('O'), rsub('O') + ' · ' + optSub(), 's1') : kpi(SCN.O, '–', optSub(), 's1');
   }
-  html += kpi('Nettovermögen bei Entnahmestart ' + ws, keur(wB) + ' (B)', keur(wA) + ' (A), heutige Kaufkraft');
+  html += kpi('Nettovermögen bei Entnahmestart ' + ws, keur(wealth('B')), 'deine Aufteilung · ' + keur(wealth('A')) + ' nur ETF' + (OPT ? ' · ' + keur(wealth('O')) + ' Optimum' : '') + ', heutige Kaufkraft');
   $('#kpis').innerHTML = html;
+}
+// Kurzbeschreibung einer Produkt-Aufteilung
+function optLabel(patch) {
+  const parts = Object.keys(PROD).filter(k => patch.some(p => prodUsed(p, k))).map(k => k === 'avd' ? 'AVD' : k === 'prv' ? 'private RV' : PROD[k]);
+  return parts.length ? parts.join(' · ') : 'nur ETF';
 }
 function kpi(l, v, d, sw, b) { return `<div class="kpi${b ? ' b' : ''}"><div class="l">${sw ? `<span class="sw" style="background:var(--${sw})"></span>` : ''}${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`; }
 
@@ -298,6 +332,50 @@ function renderFacts() {
       ['Erste Auszahlung', startRow ? eur(startRow.avdPay[i] / 12 / startRow.priceIdx) + '/M.' : '–'],
     ].map(([l, v]) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`).join('');
   });
+  // Basisrente und private RV
+  const fact = (l, v) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`;
+  I.persons.forEach((P, i) => POLICIES.forEach(k => {
+    const el = $(`#${k}facts-${i}`); if (!el) return;
+    const st = R.simB.pol[i][k], cfg = P[k];
+    if (!st) { el.innerHTML = ''; return; }
+    const y0 = Math.floor(st.s0 / 12), r0 = R.simB.rows.find(r => r.year === y0) || R.simB.rows[R.simB.rows.length - 1];
+    const teil = k === 'prv' ? (cfg.mode === 'kapital' ? 1 : cfg.mode === 'teil' ? cfg.teil : 0) : 0;
+    const cap = st.lump + (cfg.rf > 0 ? st.rentM * 10000 / cfg.rf : 0);
+    const rent = st.rentM * (1 - cfg.rk);
+    const eff = policyEffCost(cfg, P.by + cfg.payStart - I.startYear, ST.A.ret);
+    const tot = key => sum(R.simB.rows.map(r => r.pp[i][key] || 0));
+    const items = [
+      ['Kapital bei Rentenbeginn ' + y0 + ' (heute)', keur(cap / r0.priceIdx)],
+      [teil < 1 ? 'Erste Rente (heutige Kaufkraft)' : 'Kapitalauszahlung', teil < 1 ? eur(rent / r0.priceIdx) + '/M.' : keur(st.lump / r0.priceIdx)],
+      ['Effektivkosten', eff ? pc(eff.eff, 2).replace(' %', ' Pp.') : '–'],
+      ['Kosten bis Rentenbeginn', keur(st.cost)],
+    ];
+    if (k === 'basis') items.push(['Steuererstattung gesamt', keur(tot('basisRefund'))], ['Steuerpflichtiger Anteil', pc(LAW.besteuerungsanteil(y0), 0)]);
+    else {
+      if (teil > 0) items.push(['Steuer auf Kapital', keur(tot('lumpTax'))], ['Hälftelung', st.half ? 'ja' : '<span class="pill warn">nein</span>']);
+      if (teil < 1) items.push(['Ertragsanteil der Rente', pc(ertragsanteil(cfg.payStart), 0)]);
+    }
+    el.innerHTML = items.map(([l, v]) => fact(l, v)).join('');
+  }));
+  // Budgetübersicht im ersten Rechenjahr
+  const bt = $('#budget-tbl');
+  if (bt) {
+    const r = R.simB.rows[0], A0 = R.simA.rows[0];
+    const n = I.persons.length;
+    const per = (who, key) => who < 0 ? sum(I.persons.map((p, i) => r.pp[i][key] || 0)) : r.pp[who][key] || 0;
+    const lines = [
+      ['Altersvorsorgedepot (Eigenbeitrag)', w => per(w, 'avdIn')],
+      ['Basisrente', w => per(w, 'basisIn')],
+      ['Private Rentenversicherung', w => per(w, 'prvIn')],
+      ['ETF-Depot (Rest)', w => w < 0 ? r.etfContrib : r.etfContrib / n],
+      ['Kreditraten', w => w < 0 ? r.loanPay : r.loanPay / n],
+    ];
+    const cols = [...I.persons.map((p, i) => i), -1];
+    $('#budget-sub').textContent = `${r.year} · pro Monat · nominal`;
+    bt.innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : I.persons[c].name}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f]) => `<tr><td class="txt">${l}</td>${cols.map(c => `<td>${eur(f(c) / 12)}</td>`).join('')}</tr>`).join('')}
+      <tr style="border-top:2px solid var(--line-2)"><td class="txt"><b>Budget</b></td>${cols.map(c => `<td><b>${eur((c < 0 ? r.budget : r.budget / n) / 12)}</b></td>`).join('')}</tr></tbody></table>`
+      + (R.simB.rows.some(x => x.budgetCut < 0.999) ? `<p class="note" style="margin:8px"><span class="pill warn">Budget reicht nicht</span> Die Beiträge der Vorsorgeprodukte sind höher als das Budget nach Kreditraten. In diesen Jahren werden alle Beiträge anteilig gekürzt.</p>` : '');
+  }
   const fi = $('#fund-issues');
   if (fi) {
     const iss = fundIssues(I);
@@ -306,15 +384,16 @@ function renderFacts() {
   const rf = $('#refund-info');
   if (rf) {
     const sv = R.simB;
-    rf.innerHTML = `Bis zum Rentenbeginn bekommt ihr <b class="num">${keur(sv.sumZulagen)}</b> Zulagen und <b class="num">${keur(sv.sumRefunds)}</b> zusätzliche Steuererstattung aus dem Sonderausgabenabzug (nominal). Die Erstattung fließt im Folgejahr ins ETF-Depot. Kapital in heutiger Kaufkraft.`;
+    rf.innerHTML = `Bis zum Rentenbeginn bekommt ihr <b class="num">${keur(sv.sumZulagen)}</b> Zulagen und <b class="num">${keur(sv.sumRefunds)}</b> zusätzliche Steuererstattung aus dem Sonderausgabenabzug (nominal). Die Erstattung kommt im Folgejahr und fließt wie in der Karte eingestellt. Kapital in heutiger Kaufkraft.`;
   }
 }
 
 // ═══ Reiter 2: Strategie ═══
+const REFUND_OPTS = (k) => [['same', k === 'avd' ? 'ins AVD (ungefördert)' : 'in die Basisrente'], ['etf', 'ins ETF-Depot'], ['none', 'wird verbraucht']];
 function avdCard(i) {
   const P = ST.I.persons[i], b = `I.persons.${i}.avd`;
   return `<div class="card">
-    <div class="card-h"><h2>Altersvorsorgedepot ${P.name}</h2>${C(b + '.on', 'In Szenario B nutzen', { rr: 1 })}</div>
+    <div class="card-h"><h2>Altersvorsorgedepot ${P.name}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${P.avd.on ? `<div class="fields">
       ${F(b + '.eigen', 'Geförderter Eigenbeitrag', { t: 'eur', u: '€/Jahr', step: 60, min: 0, max: 1800, h: 'Maximal 1.800 €. Mindestens 120 € für Zulagen.' })}
       ${F(b + '.extra', 'Zusätzlich ungefördert', { t: 'eur', u: '€/Jahr', step: 120, min: 0, max: 5040, h: 'Bis 6.840 € insgesamt. Später wird nur der Ertrag besteuert.' })}
@@ -322,8 +401,51 @@ function avdCard(i) {
       ${S(b + '.teilkapital', 'Einmalauszahlung zu Beginn', [[0, 'Keine'], [0.1, '10 %'], [0.2, '20 %'], [0.3, '30 % (Maximum)']])}
       ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(65, 70))}
       ${S(b + '.payEnd', 'Auszahlungsplan bis Alter', yearOpts(85, 100))}
+      ${S(b + '.refundTo', 'Steuererstattung § 10a fließt', REFUND_OPTS('avd'), { h: 'Steuerersparnis über der Zulage, kommt im Folgejahr' })}
     </div>
-    <div class="facts" id="avdfacts-${i}"></div>` : '<p class="note">In Szenario B spart ' + P.name + ' nur ins ETF-Depot.</p>'}
+    <div class="facts" id="avdfacts-${i}"></div>` : '<p class="note">' + P.name + ' spart nicht ins Altersvorsorgedepot.</p>'}
+  </div>`;
+}
+// Kostenfelder wie im Produktinformationsblatt, mit Vorlagen
+function costFields(b, cfg) {
+  const is = k => Object.entries(INS_PRESETS[k]).every(([f, v]) => Math.abs((cfg[f] ?? 0) - v) < 1e-9);
+  return `<div class="card-h"><h3>Kosten laut Produktinformationsblatt</h3><div class="seg">${[['provision', 'Provisionstarif'], ['netto', 'Nettotarif']].map(([k, l]) => `<button data-preset="${b}|${k}" aria-pressed="${is(k)}">${l}</button>`).join('')}</div></div>
+    <div class="fields three">
+      ${F(b + '.akv', 'Abschluss- und Vertriebskosten', { t: 'pct', step: 0.1, h: '% der Beitragssumme, auf 5 Jahre verteilt. Zuzahlungen sofort.' })}
+      ${F(b + '.vkBeitrag', 'Verwaltungskosten Beiträge', { t: 'pct', step: 0.5, h: '% jedes Beitrags' })}
+      ${F(b + '.vkFix', 'Verwaltungskosten fest', { t: 'eur', u: '€/Jahr', step: 6, h: 'In der Ansparphase' })}
+      ${F(b + '.vkKapital', 'Verwaltungskosten Kapital', { t: 'pct', step: 0.05, h: '% des gebildeten Kapitals pro Jahr' })}
+      ${F(b + '.ter', 'Fondskosten (TER)', { t: 'pct', step: 0.05, h: 'ETF etwa 0,2 %, aktive Fonds 1,5 %' })}
+      ${F(b + '.rk', 'Kosten Rentenphase', { t: 'pct', step: 0.1, h: '% jeder Rente' })}
+      ${F(b + '.rf', 'Rentenfaktor', { t: 'num', step: 0.5, u: '€ je 10.000 €', h: 'Monatsrente je 10.000 € Kapital. Garantiert meist 24 bis 29 €.' })}
+      ${F(b + '.rentDyn', 'Rentensteigerung', { t: 'pct', step: 0.1, h: 'pro Jahr aus Überschüssen, nicht garantiert' })}
+    </div>`;
+}
+function basisCard(i) {
+  const P = ST.I.persons[i], b = `I.persons.${i}.basis`, c = P.basis;
+  return `<div class="card">
+    <div class="card-h"><h2>Basisrente ${P.name}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
+    ${c.on ? `<div class="fields three">
+      ${F(b + '.beitrag', 'Beitrag', { t: 'eur', u: '€/Jahr', step: 300, min: 0 })}
+      ${S(b + '.payStart', 'Rente ab Alter', yearOpts(62, 70), { h: 'Frühestens mit 62' })}
+      ${S(b + '.refundTo', 'Steuererstattung fließt', REFUND_OPTS('basis'), { h: 'Kommt im Folgejahr' })}
+    </div>
+    ${costFields(b, c)}
+    <div class="facts" id="basisfacts-${i}"></div>` : `<p class="note">Beiträge sind bis zum Höchstbetrag (2026: 30.826 € je Person, abzüglich Arbeitnehmer- und Arbeitgeberbeitrag zur gesetzlichen Rente) als Sonderausgaben abziehbar. Die Rente ist wie die gesetzliche Rente zu versteuern, lebenslang, nicht vererbbar und nicht kapitalisierbar.</p>`}
+  </div>`;
+}
+function prvCard(i) {
+  const P = ST.I.persons[i], b = `I.persons.${i}.prv`, c = P.prv;
+  return `<div class="card">
+    <div class="card-h"><h2>Private Rentenversicherung ${P.name}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
+    ${c.on ? `<div class="fields three">
+      ${F(b + '.beitrag', 'Beitrag', { t: 'eur', u: '€/Jahr', step: 300, min: 0 })}
+      ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(60, 75), { h: 'Hälftelung erst ab 62 und nach 12 Jahren' })}
+      ${S(b + '.mode', 'Auszahlung als', [['rente', 'Lebenslange Rente'], ['kapital', 'Kapital (ins ETF-Depot)'], ['teil', 'Teilkapital + Rente']], { rr: 1 })}
+      ${c.mode === 'teil' ? S(b + '.teil', 'Teilkapital', [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map(v => [v, pc(v, 0)])) : ''}
+    </div>
+    ${costFields(b, c)}
+    <div class="facts" id="prvfacts-${i}"></div>` : `<p class="note">Fondsgebundene Rentenversicherung ohne Förderung. In der Ansparphase fällt keine Steuer an. Die Rente ist nur mit dem Ertragsanteil steuerpflichtig (17 % bei Beginn mit 67). Bei Kapitalauszahlung zählen 85 % des Ertrags, ab 62 und nach 12 Jahren davon die Hälfte.</p>`}
   </div>`;
 }
 function fundsHtml() {
@@ -357,6 +479,14 @@ function legalTable() {
     ['Altersvorsorgedepot', 'Auszahlung ab 65 bis 70, Plan bis mind. 85, bis 30 % Einmalbetrag', 'G', '§ 1 AltZertG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', 'Auszahlung voll steuerpflichtig, keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'A', 'Praxis wie Riester, nicht ausdrücklich geregelt', 'https://www.gesetze-im-internet.de/sgb_5/__229.html'],
+    ['Basisrente', 'Höchstbetrag 30.826 € je Person (2026), gemeinsam bei Zusammenveranlagung, minus AN- und AG-Beitrag zur GRV', 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
+    ['Basisrente', 'Höchstbetrag 2027: 32.308 € (knappschaftliche BBG 130.800 € laut Kabinettsbeschluss)', 'E', 'SV-Rechengrößenverordnung 2027', ''],
+    ['Basisrente', 'Rente frühestens ab 62, Besteuerung wie gesetzliche Rente', 'G', '§ 22 Nr. 1 S. 3 a aa EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
+    ['Basisrente, private RV', 'Kostenarten wie im Produktinformationsblatt', 'G', '§ 2a AltZertG, AltvPIBV', 'https://www.gesetze-im-internet.de/altzertg/__2a.html'],
+    ['Private Rentenversicherung', 'Rente mit Ertragsanteil (17 % bei Beginn mit 67)', 'G', '§ 22 Nr. 1 S. 3 a bb EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
+    ['Private Rentenversicherung', 'Kapital: 15 % des Ertrags steuerfrei (fondsgebunden), ab 62 und nach 12 Jahren die Hälfte mit persönlichem Steuersatz, sonst Abgeltungsteuer', 'G', '§ 20 Abs. 1 Nr. 6 EStG', 'https://www.gesetze-im-internet.de/estg/__20.html'],
+    ['Krankenversicherung', 'Basisrente und private RV in der KVdR beitragsfrei, freiwillig Versicherte zahlen auf die volle Rente', 'G', '§ 240 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__240.html'],
+    ['Krankenversicherung', 'Kapitalauszahlung bei freiwillig Versicherten: 1/120 über 10 Jahre', 'A', 'Annahme analog § 229 SGB V', ''],
     ['Rentenversicherung', 'Rentenwert 42,52 € ab 1.7.2026, BBG 101.400 € / 106.200 €', 'G', 'SGB VI, RV-Rechengrößen', 'https://www.deutsche-rentenversicherung.de/'],
     ['Rentenversicherung', 'Haltelinie 48 % bis 2031, danach Dämpfung (Schalter)', 'G', 'Rentenpaket 2025', ''],
     ['Rentenversicherung', 'Regelaltersgrenze 67, Abschlag 0,3 % je Monat', 'G', '§§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__77.html'],
@@ -372,12 +502,23 @@ function renderP1() {
   const I = ST.I;
   const W = I.withdraw;
   $('#p1').innerHTML = `
-  <p class="note"><b>Szenario A</b> spart alles ins normale ETF-Depot. <b>Szenario B</b> zahlt zuerst ins Altersvorsorgedepot und den Rest ins ETF-Depot. Beide nutzen dasselbe Budget, dieselbe Rendite und dieselbe Entnahmestrategie.</p>
+  <p class="note">Das Sparbudget fließt zuerst in die Vorsorgeprodukte, die du hier einschaltest, der Rest ins ETF-Depot. <b>Deine Aufteilung</b> wird mit <b>nur ETF-Depot</b> und dem <b>Optimum</b> aus dem Optimierer verglichen. Alle nutzen dasselbe Budget, dieselbe Rendite und dieselbe Entnahmestrategie.</p>
+  <div class="card">
+    <div class="card-h"><h2>So verteilt sich dein Budget</h2><span class="muted" id="budget-sub"></span></div>
+    <div class="tablebox" id="budget-tbl"></div>
+  </div>
   <div class="grid">${avdCard(0)}${avdCard(1)}</div>
   <div class="note" id="refund-info"></div>
+  <div class="grid">${basisCard(0)}${basisCard(1)}</div>
+  <div class="grid">${prvCard(0)}${prvCard(1)}</div>
+  <p class="note">Renten aus Basisrente und privater Rentenversicherung laufen lebenslang. Der Rechner rechnet wie überall bis zum Zielalter. Dass die Rente auch darüber hinaus gezahlt wird, und dass das Kapital mit Rentenbeginn nicht mehr vererbbar ist, bewertet er nicht. Das Versicherungskapital zählt bis zum Rentenbeginn zum Vermögen.</p>
   <div class="card">
-    <div class="card-h"><h2>Beste Einstellung suchen</h2><button class="btn primary" id="btn-opt">Optimierer starten</button></div>
-    <p class="muted" style="margin:0">Probiert für beide Personen Eigenbeitrag, Zusatzbeitrag, Auszahlungsbeginn, Laufzeit und Einmalauszahlung durch. Ziel ist das höchste dauerhafte Netto in heutiger Kaufkraft.</p>
+    <div class="card-h"><h2>Beste Aufteilung suchen</h2><div class="row"><button class="btn primary" id="btn-opt">Optimierer starten</button><button class="btn" id="btn-opt-stop" hidden>Abbrechen</button></div></div>
+    <div class="fields three">
+      ${S('A.optMode', 'Verfahren', [['fast', 'Schnell (feste Rendite)'], ['mc', 'Monte Carlo (50 Verläufe)']], { rr: 1, h: ST.A.optMode === 'mc' ? 'Verfeinert das schnelle Optimum, dauert etwa eine halbe bis zwei Minuten' : 'Dauert wenige Sekunden' })}
+      ${ST.A.optMode === 'mc' ? S('A.optQ', 'Ziel', [[0.1, 'Netto, das in 90 % der Verläufe reicht'], [0.25, 'Netto, das in 75 % der Verläufe reicht'], [0.5, 'Typischer Verlauf (50 %)']]) : ''}
+    </div>
+    <p class="muted" style="margin:0">Probiert für beide Personen aus, wie viel in Altersvorsorgedepot, Basisrente und private Rentenversicherung fließt, und deren Auszahlungsoptionen. Der Rest geht ins ETF-Depot. Kosten bleiben wie eingetragen. Ziel ist das höchste Netto in heutiger Kaufkraft.</p>
     <div class="progress"><div id="opt-bar"></div></div>
     <div id="opt-out"></div>
   </div>
@@ -429,6 +570,10 @@ function renderP1() {
   </details>`;
   $('#btn-split').onclick = () => { autoSplit(); renderPanels(); scheduleRecalc(); save(); };
   $('#btn-opt').onclick = runOptimizer;
+  $('#btn-opt-stop').onclick = () => { if (OPT_RUN) OPT_RUN.cancel(); OPT_RUN = null; $('#btn-opt').disabled = false; $('#btn-opt-stop').hidden = true; $('#opt-out').innerHTML = '<p class="muted">Abgebrochen.</p>'; };
+  $$('[data-preset]').forEach(b => b.onclick = () => { const [path, k] = b.dataset.preset.split('|'); Object.assign(getP(path), INS_PRESETS[k]); save(); renderPanels(); scheduleRecalc(); });
+  if (OPT_RUN) { $('#btn-opt').disabled = true; $('#btn-opt-stop').hidden = false; }
+  if (OPT) renderOptResult();
 }
 function syncFunds() {
   const D = ST.I.depot;
@@ -464,21 +609,50 @@ function autoSplit() {
   const span = end - I.startYear + 1, n = D.funds.length;
   D.funds.forEach((f, k) => { f.from = I.startYear + Math.round(span * k / n); f.to = k === n - 1 ? end : I.startYear + Math.round(span * (k + 1) / n) - 1; });
 }
+const OPT_LAB = {
+  avd: { on: 'Genutzt', eigen: 'Geförderter Eigenbeitrag', extra: 'Ungeförderter Zusatzbeitrag', payStart: 'Auszahlung ab', payEnd: 'Plan bis', teilkapital: 'Einmalauszahlung' },
+  basis: { on: 'Genutzt', beitrag: 'Beitrag', payStart: 'Rente ab' },
+  prv: { on: 'Genutzt', beitrag: 'Beitrag', payStart: 'Auszahlung ab', mode: 'Auszahlung als' },
+};
+function optFmt(k, v) {
+  if (k === 'on') return v ? 'ja' : 'nein';
+  if (['eigen', 'extra', 'beitrag'].includes(k)) return eur(v) + '/Jahr';
+  if (k === 'teilkapital') return pc(v, 0);
+  if (k === 'mode') return { rente: 'Rente', kapital: 'Kapital', teil: 'Teilkapital + Rente' }[v];
+  return v + ' Jahre';
+}
 function runOptimizer() {
-  const b = $('#btn-opt'); b.disabled = true;
-  const base = R.netB;
-  optimize(ST.I, ST.A, (p, n) => { $('#opt-bar').style.width = (p * 100).toFixed(0) + '%'; $('#opt-out').innerHTML = `<p class="muted">Bisher bestes Netto: <b class="num">${eur(n)}</b>/Monat</p>`; },
-    (best, n) => {
-      b.disabled = false;
-      const lab = { eigen: 'Geförderter Eigenbeitrag', extra: 'Ungeförderter Zusatzbeitrag', payStart: 'Auszahlung ab', payEnd: 'Plan bis', teilkapital: 'Einmalauszahlung', on: 'Genutzt' };
-      const fmt = (k, v) => k === 'eigen' || k === 'extra' ? eur(v) + '/Jahr' : k === 'teilkapital' ? pc(v, 0) : k === 'on' ? (v ? 'ja' : 'nein') : v + ' Jahre';
-      const rows = [];
-      best.persons.forEach((p, i) => Object.keys(lab).forEach(k => { const o = ST.I.persons[i].avd[k], v = p.avd[k]; rows.push(`<tr><td>${p.name}</td><td class="txt">${lab[k]}</td><td>${fmt(k, o)}</td><td>${o !== v ? `<b>${fmt(k, v)}</b>` : fmt(k, v)}</td></tr>`); }));
-      $('#opt-out').innerHTML = `<p>Bestes Netto: <b class="num">${eur(n)}</b>/Monat, das sind <b class="num">${(n - base >= 0 ? '+' : '') + eur(n - base)}</b> gegenüber deiner Einstellung.</p>
-        <div class="tablebox"><table><thead><tr><th>Person</th><th>Stellschraube</th><th>Jetzt</th><th>Optimum</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
-        <div class="row" style="margin-top:8px"><button class="btn primary" id="btn-opt-apply">Optimum übernehmen</button></div>`;
-      $('#btn-opt-apply').onclick = () => { best.persons.forEach((p, i) => ST.I.persons[i].avd = p.avd); save(); renderPanels(); recalc(); };
+  const b = $('#btn-opt'); b.disabled = true; $('#btn-opt-stop').hidden = false;
+  const mode = ST.A.optMode, q = ST.A.optQ;
+  OPT_RUN = optimize(ST.I, ST.A, { mode, q }, (p, n, phase) => {
+    $('#opt-bar').style.width = (p * 100).toFixed(0) + '%';
+    $('#opt-out').innerHTML = `<p class="muted">${phase}: bisher bestes ${phase === 'Monte Carlo' ? `Netto in ${pc(1 - q, 0)} der Verläufe` : 'Netto'} <b class="num">${eur(n)}</b>/Monat</p>`;
+  }, (best, n, info) => {
+    OPT_RUN = null; b.disabled = false; $('#btn-opt-stop').hidden = true;
+    OPT = { patch: optPatch(best), net: n, info, sig: optSig() };
+    recalc(); renderOptResult();
+  });
+}
+function renderOptResult() {
+  const el = $('#opt-out'); if (!el || !OPT || !R) return;
+  const P = ST.I.persons, stale = OPT.sig !== optSig();
+  const rows = [];
+  P.forEach((p, i) => Object.keys(OPT_LAB).forEach(k => {
+    const cur = p[k], opt = OPT.patch[i][k];
+    const uC = prodUsed(p, k), uO = prodUsed({ [k]: opt }, k);
+    // Beiträge zeigen, wenn eines von beiden das Produkt nutzt, Auszahlungsoptionen nur für das genutzte Optimum
+    const keys = Object.keys(OPT_LAB[k]).filter(f => f === 'on' || (uC || uO) && (OPT_AMOUNT[k].includes(f) || uO));
+    keys.forEach(f => {
+      const o = f === 'on' ? prodUsed(p, k) : cur[f], v = f === 'on' ? prodUsed({ [k]: opt }, k) : opt[f];
+      rows.push(`<tr><td>${p.name}</td><td class="txt">${PROD[k]}</td><td class="txt">${OPT_LAB[k][f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
     });
+  }));
+  const d = (R.netO ?? 0) - (R.netB ?? 0);
+  const mc = OPT.info.mode === 'mc' ? ` Ziel war das Netto, das in ${pc(1 - OPT.info.q, 0)} von ${OPT.info.runs} Verläufen reicht: Optimum <b class="num">${eur(OPT.info.pct)}</b>, deine Aufteilung <b class="num">${eur(OPT.info.pctB)}</b>, nur ETF <b class="num">${eur(OPT.info.pctA)}</b> pro Monat. Bei fester Rendite kann das Optimum darunter liegen, weil es auf schlechte Verläufe hin optimiert ist.` : '';
+  el.innerHTML = `<p>${stale ? '<span class="pill warn">veraltet</span> Eingaben haben sich seit dem Lauf geändert. ' : ''}Optimum: <b class="num">${eur(R.netO ?? OPT.net)}</b>/Monat bei fester Rendite, das sind <b class="num">${(d >= 0 ? '+' : '') + eur(d)}</b> gegenüber deiner Aufteilung.${mc}</p>
+    <div class="tablebox"><table><thead><tr><th>Person</th><th>Produkt</th><th>Stellschraube</th><th>Jetzt</th><th>Optimum</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
+    <div class="row" style="margin-top:8px"><button class="btn primary" id="btn-opt-apply">Optimum übernehmen</button></div>`;
+  $('#btn-opt-apply').onclick = () => { OPT.patch.forEach((pp, i) => Object.assign(ST.I.persons[i], clone(pp))); save(); renderPanels(); recalc(); };
 }
 
 // ═══ Reiter 3: Entwicklung ═══
@@ -487,7 +661,7 @@ function renderP2() {
   $('#p2').innerHTML = `
   <div class="row">
     <span class="muted">Details für</span>
-    <div class="seg" id="seg-scen"><button data-v="A" aria-pressed="${chartScen === 'A'}">A · nur ETF</button><button data-v="B" aria-pressed="${chartScen === 'B'}">B · mit Altersvorsorgedepot</button></div>
+    <div class="seg" id="seg-scen">${['A', 'B', 'O'].map(k => `<button data-v="${k}" aria-pressed="${chartScen === k}"${k === 'O' && !OPT ? ' disabled title="Erst den Optimierer im Reiter Strategie starten"' : ''}>${SCN[k]}</button>`).join('')}</div>
     <div class="seg" id="seg-person"><button data-v="-1" aria-pressed="${chartPerson === -1}">Haushalt</button>${names.map((n, i) => `<button data-v="${i}" aria-pressed="${chartPerson === i}">${n}</button>`).join('')}</div>
     <span class="spacer"></span>
     <div class="seg" id="seg-real"><button data-v="1" aria-pressed="${chartReal}">Heutige Kaufkraft</button><button data-v="0" aria-pressed="${!chartReal}">Nominal</button></div>
@@ -499,19 +673,19 @@ function renderP2() {
   </div>
   <div class="card"><div class="card-h"><h2>Vermögen</h2><span class="muted" id="wealth-sub"></span></div><div class="chart" id="ch-wealth" role="img" aria-label="Vermögensverlauf"></div></div>
   <div class="card"><div class="card-h"><h2>Kapital je ETF-Sparplan</h2><span class="muted" id="funds-sub"></span></div><div class="chart" id="ch-funds" role="img" aria-label="Kapital je ETF-Sparplan"></div></div>
-  <div class="card"><div class="card-h"><h2>Altersvorsorgedepot</h2><span class="muted" id="avd-sub"></span></div><div class="chart" id="ch-avd" role="img" aria-label="Kapital und Auszahlungen im Altersvorsorgedepot"></div></div>
+  <div class="card"><div class="card-h"><h2>Vorsorgeprodukte</h2><span class="muted" id="avd-sub"></span></div><div class="chart" id="ch-avd" role="img" aria-label="Kapital in Altersvorsorgedepot, Basisrente und privater Rentenversicherung"></div></div>
   <div class="grid">
-    <div class="card"><h2>Sparen pro Jahr<span class="infotip" tabindex="0" aria-label="Annahmen">i<span class="tip" role="tooltip"><b>Annahme:</b> Die Steuer auf Ausschüttungen und Vorabpauschale des ETF-Depots wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a) fließen zusätzlich ins ETF-Depot.</span></span></h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div></div>
+    <div class="card"><h2>Sparen pro Jahr<span class="infotip" tabindex="0" aria-label="Annahmen">i<span class="tip" role="tooltip"><b>Annahme:</b> Die Steuer auf Ausschüttungen und Vorabpauschale des ETF-Depots wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a, Basisrente) fließen je nach Einstellung als Zuzahlung ins Produkt oder ins ETF-Depot.</span></span></h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div></div>
     <div class="card"><h2>Einkommen im Ruhestand pro Monat</h2><div class="chart sm" id="ch-income" role="img" aria-label="Einkommen im Ruhestand"></div></div>
   </div>
   <div class="grid">
     <div class="card"><h2>Steuern und Beiträge im Ruhestand pro Monat</h2><div class="chart sm" id="ch-deduct" role="img" aria-label="Abzüge im Ruhestand"></div></div>
-    <div class="card"><h2>Abzüge im Vergleich A und B</h2><div class="chart sm" id="ch-compare" role="img" aria-label="Abzüge A gegen B"></div></div>
+    <div class="card"><h2>Abzüge im Vergleich</h2><div class="chart sm" id="ch-compare" role="img" aria-label="Abzüge A gegen B"></div></div>
   </div>
   <div class="card">
     <div class="card-h"><h2>Monte Carlo: Wie sicher ist das Netto?</h2>
       <div class="row">${S('A.mcRuns', 'Läufe', [[100, '100'], [200, '200'], [500, '500']])}<button class="btn primary" id="btn-mc" style="align-self:flex-end">Simulation starten</button></div></div>
-    <p class="muted" style="margin:0">Zufällige Renditen und Inflation je Jahr. Für jeden Verlauf wird das höchste Netto bestimmt, das bis zum Zielalter reicht. Beide Szenarien laufen auf denselben Verläufen. Die Werte gelten für den ganzen Haushalt.</p>
+    <p class="muted" style="margin:0">Zufällige Renditen und Inflation je Jahr. Für jeden Verlauf wird das höchste Netto bestimmt, das bis zum Zielalter reicht. Nur ETF, deine Aufteilung und das Optimum laufen auf denselben Verläufen. Die Werte gelten für den ganzen Haushalt.</p>
     <div class="progress"><div id="mc-bar"></div></div>
     <div id="mc-out"></div>
     <div class="grid"><div class="chart sm" id="ch-mc-dist" role="img" aria-label="Verteilung des Nettos"></div><div class="chart sm" id="ch-mc-fan" role="img" aria-label="Bandbreite des Vermögens"></div></div>
@@ -526,8 +700,10 @@ function renderP2() {
 
 // Werte je Zeile für Haushalt oder eine Person
 const sum = a => a.reduce((x, y) => x + y, 0);
+const PERS_ARR = ['basis', 'prv', 'basisIn', 'prvIn', 'basisPay', 'prvPay', 'basisPayW', 'prvPayW', 'lump'];
 function V(r, k, who = chartPerson) {
   if (who >= 0) return r.pp[who][k];
+  if (PERS_ARR.includes(k)) return sum(r[k]);
   switch (k) {
     case 'avd': return sum(r.avd);
     case 'avdIn': return sum(r.avdIn);
@@ -566,6 +742,8 @@ function baseOpt(extra = {}) {
     ...extra,
   };
 }
+// Platz für mehrzeilige Legenden in den kleinen Charts
+const withLegend = opt => { const n = opt.series.length, el = 44 + (n > 4 ? 22 : 0) + (n > 7 ? 22 : 0); opt.grid = { ...opt.grid, top: window.innerWidth < 600 ? el + 24 : el }; return opt; };
 function renderWho(sim) {
   const ws = sim.wFullYear;
   const r = sim.rows.find(x => x.year === ws), rb = sim.rows.find(x => x.year === sim.wStartYear - 1);
@@ -575,26 +753,34 @@ function renderWho(sim) {
   const m = v => eur(dv(r, v) / 12);
   const save = sim.rows.filter(x => x.saveMonths > 0);
   const tot = (k, who) => sum(save.map(x => V(x, k, who)));
+  const has = k => sim.rows.some(x => V(x, k, -1) > 0 || V(x, k + 'Pay', -1) > 0);
   const cols = [...P.map((p, i) => i), -1];
   const lines = [
     ['Nettovermögen bei Entnahmestart', who => keur(dv(rb, V(rb, 'netWorth', who))), 'sub'],
     ['davon ETF-Depot', who => keur(dv(rb, V(rb, 'etf', who))), ''],
-    ...(chartScen === 'B' ? [['davon Altersvorsorgedepot', who => keur(dv(rb, V(rb, 'avd', who))), '']] : []),
-    ...(chartScen === 'B' ? [['Eigene Beiträge Altersvorsorgedepot', who => keur(tot('avdIn', who)), 'n'], ['Zulagen', who => keur(tot('zul', who)), 'n'], ['Steuererstattung § 10a', who => keur(tot('refund', who)), 'n']] : []),
+    ...(has('avd') ? [['davon Altersvorsorgedepot', who => keur(dv(rb, V(rb, 'avd', who))), '']] : []),
+    ...(has('basis') ? [['davon Basisrente', who => keur(dv(rb, V(rb, 'basis', who))), '']] : []),
+    ...(has('prv') ? [['davon private Rentenversicherung', who => keur(dv(rb, V(rb, 'prv', who))), '']] : []),
+    ...(has('avd') ? [['Eigene Beiträge Altersvorsorgedepot', who => keur(tot('avdIn', who)), 'n'], ['Zulagen', who => keur(tot('zul', who)), 'n'], ['Steuererstattung § 10a', who => keur(tot('refund', who)), 'n']] : []),
+    ...(has('basis') ? [['Beiträge Basisrente', who => keur(tot('basisIn', who)), 'n'], ['Steuererstattung Basisrente', who => keur(tot('basisRefund', who)), 'n']] : []),
+    ...(has('prv') ? [['Beiträge private Rentenversicherung', who => keur(tot('prvIn', who)), 'n']] : []),
     ['Gesetzliche Rente', who => m(V(r, 'grv', who)), 'sub'],
-    ...(chartScen === 'B' ? [['Altersvorsorgedepot', who => m(V(r, 'avdPay', who)), '']] : []),
+    ...(has('avd') ? [['Altersvorsorgedepot', who => m(V(r, 'avdPay', who)), '']] : []),
+    ...(has('basis') ? [['Basisrente', who => m(V(r, 'basisPay', who)), '']] : []),
+    ...(has('prv') ? [['Private Rentenversicherung', who => m(V(r, 'prvPay', who)), '']] : []),
     ['ETF-Verkauf', who => m(V(r, 'etfSale', who)), ''],
     ['Einkommensteuer + Soli', who => '−' + m(V(r, 'est', who)), ''],
     ['Kapitalertragsteuer', who => '−' + m(V(r, 'kapTax', who)), ''],
     ['Kranken- und Pflegeversicherung', who => '−' + m(V(r, 'kv', who)), ''],
     ['Netto pro Monat', who => '<b>' + m(V(r, 'net', who)) + '</b>', 'sub'],
   ];
-  $('#who-sub').textContent = `Szenario ${chartScen} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal`;
+  $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal`;
   $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : P[c].name}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, cls]) => `<tr${cls === 'sub' ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 function renderCharts() {
   if (!R) return;
-  const sim = chartScen === 'A' ? R.simA : R.simB, other = chartScen === 'A' ? R.simB : R.simA;
+  if (chartScen === 'O' && !R.simO) chartScen = 'B';
+  const sim = simOf(chartScen), others = ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k));
   const dv = (r, v) => chartReal ? v / r.priceIdx : v;
   const C1 = cssv('--s1'), C2 = cssv('--s2'), C3 = cssv('--s3'), C4 = cssv('--s4'), C5 = cssv('--s5'), C6 = cssv('--s6'), C7 = cssv('--s7'), C8 = cssv('--s8'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
   const years = sim.rows.map(r => r.year);
@@ -602,8 +788,11 @@ function renderCharts() {
   const area = (name, data, color, stack) => ({ name, type: 'line', stack, symbol: 'none', data, lineStyle: { width: 1, color }, itemStyle: { color }, areaStyle: { color, opacity: 0.25 } });
   const total = (name, data, extra = {}) => ({ name, type: 'line', symbol: 'none', data, lineStyle: { width: 2, color: ink }, itemStyle: { color: ink }, ...extra });
   const wLine = ws => ({ markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } });
-  // Farben je Chart: Sparen und Einkommen ohne gemeinsame Farben (Reihenfolge mit validate_palette geprüft)
-  const SP = [CA, C8, C6, C5, C7, C4], IN = [C1, C2, C3];
+  // Feste Produktfarben in allen Charts: gesetzliche Rente C1, Altersvorsorgedepot C2, ETF C3, Basisrente C7, private RV C4.
+  // Reihenfolgen mit validate_palette geprüft, auch wenn einzelne Produkte fehlen.
+  const PC = { grv: C1, avd: C2, etf: C3, basis: C7, prv: C4 };
+  const on = k => sim.rows.some(r => V(r, k) > 0);   // Serie nur zeigen, wenn das Produkt genutzt wird
+  const scC = k => cssv(SCN_C[k]);
   const bar = (name, data, color, stack = 's') => ({ name, type: 'bar', stack, data, itemStyle: { color, borderColor: surf, borderWidth: 1, borderRadius: 0 }, barMaxWidth: 18, emphasis: { focus: 'series' } });
   const ws = sim.wStartYear;
   const who = chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt';
@@ -614,11 +803,13 @@ function renderCharts() {
   chartOf('ch-wealth').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: years },
     series: [
-      area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), C3, 'w'),
-      ...(chartScen === 'B' ? [area('Altersvorsorgedepot', sim.rows.map(r => dv(r, V(r, 'avd'))), C2, 'w')] : []),
-      ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), C7, 'd')] : []),
+      ...(on('prv') ? [area('Private RV', sim.rows.map(r => dv(r, V(r, 'prv'))), PC.prv, 'w')] : []),
+      area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), PC.etf, 'w'),
+      ...(on('avd') ? [area('Altersvorsorgedepot', sim.rows.map(r => dv(r, V(r, 'avd'))), PC.avd, 'w')] : []),
+      ...(on('basis') ? [area('Basisrente', sim.rows.map(r => dv(r, V(r, 'basis'))), PC.basis, 'w')] : []),
+      ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), C8, 'd')] : []),
       total('Nettovermögen', sim.rows.map(r => dv(r, V(r, 'netWorth'))), wLine(ws)),
-      { name: chartScen === 'A' ? 'Nettovermögen B' : 'Nettovermögen A', type: 'line', symbol: 'none', data: other.rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: chartScen === 'A' ? C2 : CA }, itemStyle: { color: chartScen === 'A' ? C2 : CA } },
+      ...others.map(k => ({ name: 'Nettovermögen ' + SCN[k], type: 'line', symbol: 'none', data: simOf(k).rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: scC(k) }, itemStyle: { color: scC(k) } })),
     ],
   }), true);
 
@@ -638,18 +829,18 @@ function renderCharts() {
       total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), wLine(ws))],
   }), true);
 
-  // Altersvorsorgedepot: Kapital je Person (Flächen) und Auszahlungen pro Monat (Linien)
+  // Vorsorgeprodukte: Kapital je Person (Flächen) und Einzahlungen (Linie)
   {
-    const P = ST.I.persons, PC = [cssv('--s1'), cssv('--s2')];
-    const avdSim = R.simB;   // das Depot gibt es nur in Szenario B
+    const P = ST.I.persons, PPC = [cssv('--s1'), cssv('--s2')];
+    const k = chartScen === 'A' ? 'B' : chartScen, avdSim = simOf(k);   // nur ETF hat keine Vorsorgeprodukte
     const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
-    $('#avd-sub').textContent = `Szenario B · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · ${chartReal ? 'in heutiger Kaufkraft' : 'nominal'}`;
+    $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${chartReal ? 'in heutiger Kaufkraft' : 'nominal'}`;
     let cum = 0;
-    const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => a + r.pp[i].avdIn + r.pp[i].zul, 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
+    const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => a + r.pp[i].avdIn + r.pp[i].zul + r.pp[i].basisIn + r.pp[i].prvIn, 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
     chartOf('ch-avd').setOption(baseOpt({
       xAxis: { ...baseOpt().xAxis, data: avdSim.rows.map(r => r.year) },
       series: [
-        ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, r.avd[i])), PC[i], 'a')),
+        ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, r.avd[i] + r.basis[i] + r.prv[i])), PPC[i], 'a')),
         { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(avdSim.wStartYear) },
       ],
     }), true);
@@ -657,42 +848,47 @@ function renderCharts() {
 
   // Sparen
   const sr = sim.rows.filter(r => r.saveMonths > 0);
-  chartOf('ch-save').setOption(baseOpt({
+  chartOf('ch-save').setOption(withLegend(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: sr.map(r => r.saveMonths < 12 ? `${r.year} (${r.saveMonths} Mon.)` : r.year) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
+    // Reihenfolge und Farben: Kredit C6, Sondertilgung CA, Steuern C8, private RV, ETF, Basisrente, AVD, Zulagen C1
     series: [
-      bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), SP[0]),
-      bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), SP[1]),
-      bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), SP[2]),
-      bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), SP[3]),
-      ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', sr.map(r => dv(r, V(r, 'avdIn'))), SP[4]), bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), SP[5])] : []),
+      ...(on('loanPay') ? [bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), C6)] : []),
+      ...(on('loanSonder') ? [bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), CA)] : []),
+      bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), C8),
+      ...(on('prvIn') ? [bar('Private RV', sr.map(r => dv(r, V(r, 'prvIn'))), PC.prv)] : []),
+      bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), PC.etf),
+      ...(on('basisIn') ? [bar('Basisrente', sr.map(r => dv(r, V(r, 'basisIn'))), PC.basis)] : []),
+      ...(on('avdIn') ? [bar('Altersvorsorgedepot', sr.map(r => dv(r, V(r, 'avdIn'))), PC.avd), bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), C1)] : []),
     ],
-  }), true);
+  })), true);
 
   // Einkommen
   // Monatswerte der Entnahmemonate; angebrochene Jahre sind an der Achse markiert
   const er = sim.rows.filter(r => r.wMonths > 0);
   const m = (r, v) => dv(r, v) / r.wMonths;
   const wYear = r => r.wMonths < 12 ? `${r.year} (${r.wMonths} Mon.)` : r.year;
-  chartOf('ch-income').setOption(baseOpt({
+  chartOf('ch-income').setOption(withLegend(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => { const b = ps.filter(p => p.seriesType === 'bar'); return tip(ps[0].axisValue, [...tipSeries(b), tipSum(b), ...tipSeries(ps.filter(p => p.seriesType !== 'bar'))]); } },
     series: [
-      bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), IN[0]),
-      ...(chartScen === 'B' ? [bar('Altersvorsorgedepot', er.map(r => m(r, V(r, 'avdPayW'))), IN[1])] : []),
-      bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), IN[2]),
+      ...(on('prvPayW') ? [bar('Private RV', er.map(r => m(r, V(r, 'prvPayW'))), PC.prv)] : []),
+      bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), PC.grv),
+      ...(on('avdPayW') ? [bar('Altersvorsorgedepot', er.map(r => m(r, V(r, 'avdPayW'))), PC.avd)] : []),
+      bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf),
+      ...(on('basisPayW') ? [bar('Basisrente', er.map(r => m(r, V(r, 'basisPayW'))), PC.basis)] : []),
       { name: 'Netto', type: 'line', symbol: 'circle', symbolSize: 4, data: er.map(r => m(r, V(r, 'net'))), lineStyle: { width: 2, color: ink }, itemStyle: { color: ink } },
     ],
-  }), true);
+  })), true);
 
   // Abzüge
   chartOf('ch-deduct').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
     series: [
-      bar('Einkommensteuer + Soli', er.map(r => m(r, V(r, 'estW'))), C4),
-      bar('Kapitalertragsteuer', er.map(r => m(r, V(r, 'kapTaxW'))), C5),
-      bar('Kranken- und Pflegeversicherung', er.map(r => m(r, V(r, 'kvW'))), C7),
+      bar('Einkommensteuer + Soli', er.map(r => m(r, V(r, 'estW'))), C5),
+      bar('Kapitalertragsteuer', er.map(r => m(r, V(r, 'kapTaxW'))), C6),
+      bar('Kranken- und Pflegeversicherung', er.map(r => m(r, V(r, 'kvW'))), CA),
     ],
   }), true);
 
@@ -700,10 +896,7 @@ function renderCharts() {
   const ab = s => s.rows.filter(r => r.wMonths > 0).map(r => m(r, V(r, 'estW') + V(r, 'kapTaxW') + V(r, 'kvW')));
   chartOf('ch-compare').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: R.simA.rows.filter(r => r.wMonths > 0).map(wYear) },
-    series: [
-      { name: 'A · nur ETF', type: 'line', symbol: 'none', data: ab(R.simA), lineStyle: { width: 2, color: CA }, itemStyle: { color: CA } },
-      { name: 'B · mit Altersvorsorgedepot', type: 'line', symbol: 'none', data: ab(R.simB), lineStyle: { width: 2, color: C2 }, itemStyle: { color: C2 } },
-    ],
+    series: ['A', 'B', 'O'].filter(simOf).map(k => ({ name: SCN[k], type: 'line', symbol: 'none', data: ab(simOf(k)), lineStyle: { width: 2, color: scC(k) }, itemStyle: { color: scC(k) } })),
   }), true);
 
   renderTable(sim);
@@ -716,9 +909,10 @@ function renderTable(sim) {
   const cols = [
     ['Jahr', r => r.year], ['Phase', r => r.phase], ['Alter', r => chartPerson >= 0 ? r.ages[chartPerson] : r.ages.join(' / ')],
     ['ETF-Sparrate', r => e(r, 'etfContrib')], ['AVD-Beitrag', r => e(r, 'avdIn')], ['Zulagen', r => e(r, 'zul')], ['Erstattung', r => e(r, 'refund')],
-    ['Rente', r => e(r, 'grv')], ['AVD-Auszahlung', r => e(r, 'avdPay')], ['ETF-Verkauf', r => e(r, 'etfSale')],
+    ['Basis-Beitrag', r => e(r, 'basisIn')], ['Erstattung Basis', r => e(r, 'basisRefund')], ['PRV-Beitrag', r => e(r, 'prvIn')],
+    ['Rente', r => e(r, 'grv')], ['AVD-Auszahlung', r => e(r, 'avdPay')], ['Basisrente', r => e(r, 'basisPay')], ['PRV-Rente', r => e(r, 'prvPay')], ['PRV-Kapital', r => e(r, 'lump')], ['ETF-Verkauf', r => e(r, 'etfSale')],
     ['ESt + Soli', r => e(r, 'est')], ['Kapitalertragst.', r => e(r, 'kapTax')], ['KV/PV Rente', r => e(r, 'kv')],
-    ['Netto/Monat', r => r.net ? eur(dv(r, V(r, 'net')) / r.wMonths) : '–'], ['ETF-Depot', r => e(r, 'etf')], ['AVD', r => e(r, 'avd')],
+    ['Netto/Monat', r => r.net ? eur(dv(r, V(r, 'net')) / r.wMonths) : '–'], ['ETF-Depot', r => e(r, 'etf')], ['AVD', r => e(r, 'avd')], ['Basisrente', r => e(r, 'basis')], ['Priv. RV', r => e(r, 'prv')],
     ['Kredit/Jahr', r => e(r, 'loanPay')], ['Restschuld', r => e(r, 'debt')], ['Nettovermögen', r => e(r, 'netWorth')],
   ];
   $('#tbl').innerHTML = `<table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${sim.rows.map(r => `<tr class="ph-${r.phase}">${cols.map(c => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
@@ -726,29 +920,29 @@ function renderTable(sim) {
 
 function runMC() {
   const b = $('#btn-mc'); b.disabled = true; MC = null;
-  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns || 200, seed: 7 }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
+  const variants = [{ key: 'A', I: ST.I, scenario: 'A' }, { key: 'B', I: ST.I, scenario: 'B' }, ...(OPT ? [{ key: 'O', I: applyPatch(ST.I, OPT.patch), scenario: 'B' }] : [])];
+  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns || 200, seed: 7, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
 }
 function renderMC() {
   const r = MC, qs = [0.1, 0.25, 0.5, 0.75, 0.9];
-  const CA = cssv('--sA'), C2 = cssv('--s2'), surf = cssv('--surface');
-  const pA = qs.map(q => pct(r.res.A, q)), pB = qs.map(q => pct(r.res.B, q));
-  const winB = r.res.B.filter((v, k) => v > r.res.A[k]).length / r.runs;
-  $('#mc-out').innerHTML = `<p>In 9 von 10 Verläufen reicht ein Netto von mindestens <b class="num">${eur(pA[0])}</b> (A) beziehungsweise <b class="num">${eur(pB[0])}</b> (B) pro Monat. Der typische Verlauf (50 %) trägt <b class="num">${eur(pA[2])}</b> (A) und <b class="num">${eur(pB[2])}</b> (B). B liegt in <b class="num">${pc(winB, 0)}</b> der Verläufe vorn. Das Netto aus der festen Rechnung (${eur(r.det.B)} in B) wäre in ${pc(r.fail.B / r.runs, 0)} der Verläufe nicht durchzuhalten. Schwankungen kosten: Bei gleicher typischer Rendite trägt ein schwankender Verlauf weniger als gleichmäßiges Wachstum, weil Verluste vor allem in der Entnahme durch Verkäufe zu niedrigen Kursen dauerhaft fehlen.</p>`;
+  const surf = cssv('--surface');
+  const P = Object.fromEntries(r.keys.map(k => [k, qs.map(q => pct(r.res[k], q))]));
+  const list = f => r.keys.map(k => `<b class="num">${f(k)}</b> (${SCN[k]})`).join(', ');
+  const best = r.keys.reduce((a, k) => P[k][0] > P[a][0] ? k : a, r.keys[0]);
+  $('#mc-out').innerHTML = `<p>In 9 von 10 Verläufen reicht ein Netto von mindestens ${list(k => eur(P[k][0]))} pro Monat. Der typische Verlauf (50 %) trägt ${list(k => eur(P[k][2]))}. Am besten abgesichert ist <b>${SCN[best]}</b>. Das Netto aus der festen Rechnung wäre in ${list(k => pc(r.fail[k] / r.runs, 0))} der Verläufe nicht durchzuhalten. Schwankungen kosten: Bei gleicher typischer Rendite trägt ein schwankender Verlauf weniger als gleichmäßiges Wachstum, weil Verluste vor allem in der Entnahme durch Verkäufe zu niedrigen Kursen dauerhaft fehlen. Lebenslange Renten aus Versicherungen schwanken in der Entnahme nicht mehr.</p>`;
   chartOf('ch-mc-dist').setOption(baseOpt({
     title: { text: 'Tragbares Netto pro Monat', textStyle: { fontSize: 12, color: cssv('--ink-2'), fontWeight: 600 }, right: 0, top: 0 },
     xAxis: { ...baseOpt().xAxis, data: ['10 %', '25 %', '50 %', '75 %', '90 %'] },
-    series: [
-      { name: 'A · nur ETF', type: 'bar', data: pA, itemStyle: { color: CA, borderRadius: [4, 4, 0, 0], borderColor: surf, borderWidth: 1 }, barMaxWidth: 26 },
-      { name: 'B · mit AVD', type: 'bar', data: pB, itemStyle: { color: C2, borderRadius: [4, 4, 0, 0], borderColor: surf, borderWidth: 1 }, barMaxWidth: 26 },
-    ],
+    series: r.keys.map(k => ({ name: SCN[k], type: 'bar', data: P[k], itemStyle: { color: cssv(SCN_C[k]), borderRadius: [4, 4, 0, 0], borderColor: surf, borderWidth: 1 }, barMaxWidth: 26 })),
   }), true);
-  const fan = r.fan[chartScen];
+  const key = r.keys.includes(chartScen) ? chartScen : 'B';
+  const fan = r.fan[key];
   const n = fan[0].length;
   const band = q => Array.from({ length: n }, (_, t) => pct(fan.map(f => f[t]), q));
   const p10 = band(0.1), p25 = band(0.25), p50 = band(0.5), p75 = band(0.75), p90 = band(0.9);
-  const col = chartScen === 'A' ? CA : C2;
+  const col = cssv(SCN_C[key]);
   chartOf('ch-mc-fan').setOption(baseOpt({
-    title: { text: 'Vermögen beim festen Netto, heutige Kaufkraft', textStyle: { fontSize: 12, color: cssv('--ink-2'), fontWeight: 600 }, right: 0, top: 0 },
+    title: { text: `Vermögen beim festen Netto · ${SCN[key]}`, textStyle: { fontSize: 12, color: cssv('--ink-2'), fontWeight: 600 }, right: 0, top: 0 },
     legend: { show: false },
     tooltip: { ...baseOpt().tooltip, formatter: ps => { const i = ps[0].dataIndex; return tip(r.years[i], [['90 %', p90], ['75 %', p75], ['50 %', p50], ['25 %', p25], ['10 %', p10]].map(([l, a]) => tipRow(l, a[i]))); } },
     xAxis: { ...baseOpt().xAxis, data: r.years },

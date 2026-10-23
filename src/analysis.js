@@ -5,10 +5,8 @@
 // Ewige Rente: Das reale Nettovermögen zum Zielalter ist mindestens so hoch wie zu Entnahmebeginn
 const keepsCapital = (I, s) => I.withdraw.strategy !== 'perpetual' || s.finalReal >= s.startReal;
 
-// Höchstes reales Netto (heutige Kaufkraft), bei dem das Vermögen bis zum Zielalter reicht
-// (bei der ewigen Rente zusätzlich real erhalten bleibt)
-function maxNet(I, A, scenario, path, guess) {
-  const ok = n => { const s = simulate(I, A, { scenario, targetReal: n, path }); return !s.depleted && keepsCapital(I, s); };
+// Höchstes Netto, für das ok(n) gilt: Bisektion, mit Schätzwert als Startintervall
+function maxBy(ok, guess, tol = 0.5) {
   let lo, hi;
   if (guess > 0) {
     lo = guess * 0.9; hi = guess * 1.1;
@@ -18,51 +16,108 @@ function maxNet(I, A, scenario, path, guess) {
     lo = 0; hi = 4000;
     while (ok(hi)) { lo = hi; hi *= 2; if (hi > 1e6) break; }
   }
-  for (let k = 0; k < 30 && hi - lo > 0.5; k++) { const m = (lo + hi) / 2; if (ok(m)) lo = m; else hi = m; }
+  for (let k = 0; k < 30 && hi - lo > tol; k++) { const m = (lo + hi) / 2; if (ok(m)) lo = m; else hi = m; }
   return lo;
 }
 
-// Kopie mit geänderten AVD-Einstellungen
-function withAvd(I, i, patch) {
+// Höchstes reales Netto (heutige Kaufkraft), bei dem das Vermögen bis zum Zielalter reicht
+// (bei der ewigen Rente zusätzlich real erhalten bleibt)
+function maxNet(I, A, scenario, path, guess) {
+  return maxBy(n => { const s = simulate(I, A, { scenario, targetReal: n, path }); return !s.depleted && keepsCapital(I, s); }, guess);
+}
+
+// Netto, das in mindestens (1 − q) der Verläufe reicht (q-Perzentil des tragbaren Nettos)
+function pctNet(I, A, scenario, paths, q, guess) {
+  const need = Math.ceil(paths.length * (1 - q));
+  return maxBy(n => {
+    let good = 0, bad = 0;
+    for (const path of paths) {
+      const s = simulate(I, A, { scenario, targetReal: n, path });
+      if (!s.depleted && keepsCapital(I, s)) { if (++good >= need) return true; }
+      else if (++bad > paths.length - need) return false;
+    }
+    return good >= need;
+  }, guess, 3);
+}
+
+// ─── Optimierer: Aufteilung des Budgets auf ETF-Depot, Altersvorsorgedepot, Basisrente und private RV ───
+// Koordinatensuche über Beiträge und Auszahlungsoptionen beider Personen. Der Rest des Budgets fließt ins ETF-Depot.
+const OPT_SPACE = {
+  avd: { eigen: [0, 360, 900, 1800], extra: [0, 1680, 3360, 5040], payStart: [65, 66, 67, 68, 69, 70], payEnd: [85, 88, 91, 95, 100], teilkapital: [0, 0.3] },
+  basis: { beitrag: [0, 1200, 2400, 4800, 9600, 19200], payStart: [62, 65, 67, 70] },
+  prv: { beitrag: [0, 1200, 2400, 4800, 9600], payStart: [62, 65, 67, 70], mode: ['rente', 'teil', 'kapital'] },
+};
+const OPT_AMOUNT = { avd: ['eigen', 'extra'], basis: ['beitrag'], prv: ['beitrag'] };
+const optUsed = (p, k) => OPT_AMOUNT[k].some(f => p[k][f] > 0);
+// Ausgangspunkt: alle Produkte eingeschaltet, nicht genutzte mit Beitrag 0
+function optStart(I) {
   const J = JSON.parse(JSON.stringify(I));
-  Object.assign(J.persons[i].avd, patch);
+  for (const p of J.persons) for (const k of Object.keys(OPT_SPACE)) {
+    if (!p[k].on) for (const f of OPT_AMOUNT[k]) p[k][f] = 0;
+    p[k].on = true;
+  }
+  return J;
+}
+// Ergebnis: Produkte ohne Beitrag wieder ausschalten
+function optFinish(J) {
+  const K = JSON.parse(JSON.stringify(J));
+  for (const p of K.persons) for (const k of Object.keys(OPT_SPACE)) if (!optUsed(p, k)) p[k].on = false;
+  return K;
+}
+// Produkt-Einstellungen eines Optimums auf aktuelle Eingaben übertragen
+function optPatch(J) { return J.persons.map(p => Object.fromEntries(Object.keys(OPT_SPACE).map(k => [k, JSON.parse(JSON.stringify(p[k]))]))); }
+function applyPatch(I, patch) {
+  const J = JSON.parse(JSON.stringify(I));
+  patch.forEach((pp, i) => { if (J.persons[i]) for (const k of Object.keys(pp)) J.persons[i][k] = JSON.parse(JSON.stringify(pp[k])); });
   return J;
 }
 
-// Optimierer: Koordinatensuche über die AVD-Stellschrauben beider Personen.
-// Läuft in Häppchen, damit die Oberfläche reagiert. onStep(fortschritt, bestes).
-const OPT_SPACE = {
-  eigen: [0, 360, 900, 1800],
-  extra: [0, 1680, 3360, 5040],
-  payStart: [65, 66, 67, 68, 69, 70],
-  payEnd: [85, 88, 91, 95, 100],
-  teilkapital: [0, 0.3],
-};
-function optimize(I, A, onStep, onDone) {
-  let best = JSON.parse(JSON.stringify(I));
-  for (const p of best.persons) p.avd.on = true;
-  let bestNet = maxNet(best, A, 'B');
-  const tasks = [];
-  for (let pass = 0; pass < 2; pass++)
-    for (let i = 0; i < best.persons.length; i++)
-      for (const key of Object.keys(OPT_SPACE)) tasks.push({ i, key });
-  let ti = 0;
-  const total = tasks.length;
-  function step() {
-    const t0 = Date.now();
-    while (ti < tasks.length && Date.now() - t0 < 60) {
-      const { i, key } = tasks[ti++];
-      for (const v of OPT_SPACE[key]) {
-        if (best.persons[i].avd[key] === v) continue;
-        const cand = withAvd(best, i, { [key]: v });
-        const n = maxNet(cand, A, 'B', null, bestNet);
-        if (n > bestNet + 0.5) { best = cand; bestNet = n; }
-      }
-    }
-    onStep && onStep(ti / total, bestNet, best);
-    if (ti < tasks.length) setTimeout(step, 0); else onDone && onDone(best, bestNet);
+// opts.mode: 'fast' (feste Rendite) | 'mc' (q-Perzentil über opts.runs Verläufe, verfeinert das schnelle Optimum)
+// onStep(fortschritt, bestes Netto, Phase), onDone(bestes I, Netto, Info). Rückgabe: { cancel() }
+function optimize(I, A, opts, onStep, onDone) {
+  opts = { mode: 'fast', q: 0.1, runs: 50, seed: 11, ...opts };
+  let best = optStart(I), cancelled = false, paths = null;
+  const phases = [{ obj: (J, g) => maxNet(J, A, 'B', null, g), passes: 2, w: opts.mode === 'mc' ? 0.25 : 1, name: 'Schnell' }];
+  if (opts.mode === 'mc') {
+    const years = I.persons[I.withdraw.refPerson ?? 0].by + I.withdraw.targetAge - I.startYear + 1;
+    paths = makePaths(opts.runs, years, A, opts.seed);
+    phases.push({ obj: (J, g) => pctNet(J, A, 'B', paths, opts.q, g), passes: 1, w: 0.75, name: 'Monte Carlo' });
   }
-  step();
+  let ph = 0, tasks = [], ti = 0, bestVal = 0, done0 = 0;
+  function startPhase() {
+    const P = phases[ph];
+    tasks = [];
+    for (let pass = 0; pass < P.passes; pass++)
+      for (const k of Object.keys(OPT_SPACE)) for (let i = 0; i < best.persons.length; i++)
+        for (const key of Object.keys(OPT_SPACE[k])) for (const v of OPT_SPACE[k][key]) tasks.push({ i, k, key, v });
+    ti = 0; bestVal = P.obj(best, bestVal);
+  }
+  startPhase();
+  function step() {
+    if (cancelled) return;
+    const P = phases[ph], t0 = Date.now();
+    while (ti < tasks.length && Date.now() - t0 < 60) {
+      const { i, k, key, v } = tasks[ti++];
+      const p = best.persons[i];
+      if (p[k][key] === v) continue;
+      if (!OPT_AMOUNT[k].includes(key) && !optUsed(p, k)) continue;   // Auszahlungsoptionen nur bei genutztem Produkt
+      const cand = JSON.parse(JSON.stringify(best));
+      cand.persons[i][k][key] = v;
+      const n = P.obj(cand, bestVal);
+      if (n > bestVal + 0.5) { best = cand; bestVal = n; }
+    }
+    onStep && onStep(done0 + P.w * ti / tasks.length, bestVal, P.name);
+    if (ti < tasks.length) setTimeout(step, 0);
+    else if (++ph < phases.length) { done0 += P.w; startPhase(); setTimeout(step, 0); }
+    else {
+      const J = optFinish(best);
+      // Monte Carlo: dasselbe Perzentil auch für deine Aufteilung und nur ETF, auf denselben Verläufen
+      const mc = paths ? { pct: bestVal, pctB: pctNet(I, A, 'B', paths, opts.q), pctA: pctNet(I, A, 'A', paths, opts.q) } : {};
+      onDone && onDone(J, maxNet(J, A, 'B'), { mode: opts.mode, q: opts.q, runs: opts.runs, ...mc });
+    }
+  }
+  setTimeout(step, 0);
+  return { cancel() { cancelled = true; } };
 }
 
 // Zufallszahlen mit Startwert, damit Läufe reproduzierbar sind
@@ -84,27 +139,29 @@ function makePaths(n, years, A, seed) {
   return paths;
 }
 
-// Monte Carlo: je Pfad das maximal tragbare Netto, plus Vermögensfächer beim deterministischen Plan
+// Monte Carlo: je Pfad das maximal tragbare Netto, plus Vermögensfächer beim deterministischen Plan.
+// variants: [{ key, I, scenario }] (nur ETF, deine Aufteilung, Optimum) auf denselben Verläufen
 function monteCarlo(I, A, opts, onStep, onDone) {
   const years = I.persons[I.withdraw.refPerson ?? 0].by + I.withdraw.targetAge - I.startYear + 1;
   const paths = makePaths(opts.runs, years, A, opts.seed);
-  const det = { A: maxNet(I, A, 'A'), B: maxNet(I, A, 'B') };
-  const res = { A: [], B: [] }, fan = { A: [], B: [] }, fail = { A: 0, B: 0 };
+  const vs = opts.variants || [{ key: 'A', I, scenario: 'A' }, { key: 'B', I, scenario: 'B' }];
+  const det = {}, res = {}, fan = {}, fail = {};
+  for (const v of vs) { det[v.key] = maxNet(v.I, A, v.scenario); res[v.key] = []; fan[v.key] = []; fail[v.key] = 0; }
   let k = 0;
   function step() {
     const t0 = Date.now();
     while (k < paths.length && Date.now() - t0 < 60) {
       const path = paths[k++];
-      for (const sc of ['A', 'B']) {
-        res[sc].push(maxNet(I, A, sc, path, det[sc]));
-        const r = simulate(I, A, { scenario: sc, targetReal: det[sc], path, detail: true });
-        if (r.depleted || !keepsCapital(I, r)) fail[sc]++;
-        fan[sc].push(r.rows.map(x => x.total / x.priceIdx));
+      for (const v of vs) {
+        res[v.key].push(maxNet(v.I, A, v.scenario, path, det[v.key]));
+        const r = simulate(v.I, A, { scenario: v.scenario, targetReal: det[v.key], path, detail: true });
+        if (r.depleted || !keepsCapital(v.I, r)) fail[v.key]++;
+        fan[v.key].push(r.rows.map(x => x.total / x.priceIdx));
       }
     }
     onStep && onStep(k / paths.length);
     if (k < paths.length) setTimeout(step, 0);
-    else onDone && onDone({ det, res, fan, fail, runs: paths.length, years: Array.from({ length: years }, (_, i) => I.startYear + i) });
+    else onDone && onDone({ det, res, fan, fail, keys: vs.map(v => v.key), runs: paths.length, years: Array.from({ length: years }, (_, i) => I.startYear + i) });
   }
   step();
 }

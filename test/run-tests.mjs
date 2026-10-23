@@ -6,7 +6,7 @@ import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ctx = vm.createContext({ console, Math, JSON });
-for (const f of ['law', 'depot', 'loans', 'sim', 'defaults', 'analysis'])
+for (const f of ['law', 'depot', 'insurance', 'loans', 'sim', 'defaults', 'analysis'])
   vm.runInContext(readFileSync(join(root, 'src', f + '.js'), 'utf8'), ctx);
 const g = code => vm.runInContext(code, ctx);
 
@@ -54,6 +54,47 @@ const k = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS));
 check('Ablösung aus Depot', k && k.payoff > 0 && k.gross > 0, JSON.stringify(k));
 // Reicht das Depot nicht, bleibt der ungedeckte Rest als Schuld bestehen
 check('Ungedeckter Rest bleibt Schuld', k.covered >= k.payoff - 1 ? k.debtAfter < 1 : near(k.debtAfter, k.payoff - k.covered, (k.payoff - k.covered) * 0.12), JSON.stringify(k));
+
+// 7. Ertragsanteil der Leibrente (§ 22 Nr. 1 S. 3 a bb EStG)
+for (const [age, v] of [[60, 0.22], [62, 0.21], [65, 0.18], [67, 0.17], [70, 0.15], [75, 0.11]]) check(`Ertragsanteil ${age}`, near(g(`ertragsanteil(${age})`), v, 1e-9));
+
+// 8. Basisrente und private RV: Personen-Summen, Erstattung, Steuer, nur-ETF bleibt unberührt
+const v = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS));
+  I.persons[0].basis.on = true; I.persons[0].basis.beitrag = 6000;
+  I.persons[1].prv.on = true; I.persons[1].prv.mode = 'teil'; I.persons[1].prv.teil = 0.5;
+  const nA0 = maxNet(DEFAULTS, ASSUME, 'A'), nA = maxNet(I, ASSUME, 'A'), nB = maxNet(I, ASSUME, 'B');
+  const s = simulate(I, ASSUME, { scenario: 'B', targetReal: nB, detail: true });
+  let d = 0; for (const x of s.rows) { d = Math.max(d, Math.abs(x.pp.reduce((a, p) => a + p.total, 0) - x.total)); if (x.phase === 'Entnahme') d = Math.max(d, Math.abs(x.pp.reduce((a, p) => a + p.net, 0) - x.net)); }
+  const b = s.pol[0].basis, p = s.pol[1].prv;
+  const rB = s.rows.find(r => r.basisPay[0] > 0 && r.year > Math.floor(b.s0 / 12)), rP = s.rows.find(r => r.lump[1] > 0);
+  // Ohne Hälftelung (Auszahlung vor 62): Abgeltungsteuer auf 85 % des Ertrags
+  const J = JSON.parse(JSON.stringify(I)); J.persons[1].prv.payStart = 61;
+  const sJ = simulate(J, ASSUME, { scenario: 'B', targetReal: nB, detail: true }), pJ = sJ.pol[1].prv;
+  return { nA0, nA, nB, d, depleted: s.depleted, refund: s.sumBasisRefund, rentM: b.rentM, rf: I.persons[0].basis.rf, payY: rB && rB.basisPay[0], rk: I.persons[0].basis.rk, dyn: I.persons[0].basis.rentDyn, yr: rB && rB.year - Math.floor(b.s0 / 12),
+    lump: p.lump, gain: p.gain, half: p.half, lumpTax: rP && rP.lumpTax, halfJ: pJ.half, lumpTaxJ: sJ.rows.find(r => r.lump[1] > 0).lumpTax, gainJ: pJ.gain }; })()`);
+check('Versicherungen: Personen-Summen', v.d < 0.01, v.d);
+check('Nur ETF ignoriert Vorsorgeprodukte', near(v.nA, v.nA0, 0.01), `${v.nA} / ${v.nA0}`);
+check('Basisrente: Steuererstattung', v.refund > 1000, v.refund);
+check('Basisrente: Rente aus Rentenfaktor', near(v.payY, v.rentM * 12 * (1 - v.rk) * Math.pow(1 + v.dyn, v.yr), 0.01), `${v.payY}`);
+check('Private RV: Teilkapital 50 %', v.lump > 0 && v.gain > 0 && v.half, JSON.stringify(v));
+check('Private RV: Hälftelung günstiger als Abgeltung', v.lumpTax < v.gain * 0.85 * 0.26375, `${v.lumpTax} / ${v.gain}`);
+check('Private RV: ohne Hälftelung Abgeltungsteuer', !v.halfJ && near(v.lumpTaxJ, v.gainJ * 0.85 * 0.25 * 1.055, 1), `${v.lumpTaxJ} / ${v.gainJ}`);
+
+// 9. Beiträge über dem Budget werden gekürzt, das ETF-Depot bekommt dann nichts aus dem Budget
+const c = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS)); I.budget.monthly = 200;
+  I.persons[0].basis.on = true; I.persons[0].basis.beitrag = 6000;
+  const r = simulate(I, ASSUME, { scenario: 'B', targetReal: 1000, detail: true }).rows[0];
+  return { cut: r.budgetCut, prod: r.avdIn.reduce((a, b) => a + b, 0) + r.basisIn[0], budget: r.budget }; })()`);
+check('Budgetgrenze', c.cut < 1 && near(c.prod, c.budget, 0.01), JSON.stringify(c));
+
+// 10. Effektivkosten wie im Produktinformationsblatt: Provisionstarif teurer als Nettotarif, plausible Spanne
+const e = g(`[policyEffCost({ ...DEFAULTS.persons[0].basis, beitrag: 1200 }, 40, 0.06).eff, policyEffCost({ ...DEFAULTS.persons[0].basis, ...INS_PRESETS.netto, beitrag: 1200 }, 40, 0.06).eff]`);
+check('Effektivkosten', e[0] > e[1] && e[0] > 0.008 && e[0] < 0.02 && e[1] > 0.003, e);
+
+// 11. Optimum-Patch überträgt nur Produkt-Einstellungen
+const o = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS)); const J = optStart(I); J.persons[1].basis.beitrag = 4800;
+  const K = applyPatch(I, optPatch(optFinish(J))); return { b: K.persons[1].basis.on && K.persons[1].basis.beitrag, p: K.persons[0].prv.on, inc: K.persons[0].income === I.persons[0].income }; })()`);
+check('Optimum-Patch', o.b === 4800 && o.p === false && o.inc, JSON.stringify(o));
 
 console.log(`${ok} Prüfungen bestanden, ${fail} fehlgeschlagen`);
 process.exit(fail ? 1 : 0);
