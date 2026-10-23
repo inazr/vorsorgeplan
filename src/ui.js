@@ -331,7 +331,7 @@ function renderFacts() {
     const st = R.simB.pol[i][k], cfg = P[k];
     if (!st) { el.innerHTML = ''; return; }
     const y0 = Math.floor(st.s0 / 12), r0 = R.simB.rows.find(r => r.year === y0) || R.simB.rows[R.simB.rows.length - 1];
-    const teil = k === 'prv' ? (cfg.mode === 'kapital' ? 1 : cfg.mode === 'teil' ? cfg.teil : 0) : 0;
+    const teil = teilOf(cfg, k);
     const cap = st.lump + (cfg.rf > 0 ? st.rentM * 10000 / cfg.rf : 0);
     const rent = st.rentM * (1 - cfg.rk);
     const eff = policyEffCost(cfg, P.by + cfg.payStart - I.startYear, ST.A.ret);

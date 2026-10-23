@@ -141,6 +141,13 @@ function taxablePension(gross, startYear, year, st) {
 // Steuerpflichtiges Erwerbseinkommen einer Person (Arbeitnehmer: abzüglich Arbeitnehmerpauschbetrag); floor0: Arbeitnehmeranteil nicht unter 0
 // (zvEBase ja; taxBase nein, dort wird erst die Summe mit den Renten bei 0 gekappt, sonst verschöbe sich die Aufteilung der ESt bei Einkommen unter dem Pauschbetrag)
 function earnedTaxable(p, w, L, floor0) { if (p.job !== 'employee') return w.g; const x = w.g - (w.m > 0 ? L.anPausch : 0); return floor0 ? Math.max(0, x) : x; }
+// Summe von f(o[k], k) über alle Versicherungsprodukte (Reihenfolge wie POLICIES)
+const sumPol = (o, f) => POLICIES.reduce((s, k) => s + f(o[k], k), 0);
+// Zeilenfelder je Produkt: Kapital k, Einzahlung kIn, Rente kPay, davon in Entnahmemonaten kPayW (je Person oder als Arrays)
+function polFields(o, k, v, io, pay) {
+  const m = (x, f) => Array.isArray(x) ? x.map(f) : f(x);
+  o[k] = v; o[k + 'In'] = m(io, x => x.c + x.z); o[k + 'Pay'] = m(pay, x => x.gross); o[k + 'PayW'] = m(pay, x => x.W);
+}
 
 // ═══════════════════════════════════════════════════════════════
 // simulate(I, A, opt)
@@ -179,7 +186,7 @@ function simulate(I, A, opt) {
   })));
   const kvLump = persons.map(() => []);   // Kapitalauszahlungen für KV freiwillig Versicherter (1/120 über 10 Jahre)
   // Erstattungen des Vorjahres: ins ETF-Depot oder als Zuzahlung ins jeweilige Produkt
-  const pendAvd = persons.map(() => 0), pendBasis = persons.map(() => 0);
+  const pendAvd = persons.map(() => 0), pendPol = persons.map(() => Object.fromEntries(POLICIES.map(k => [k, 0])));
 
   // Kredit
   const B = I.budget;
@@ -292,7 +299,7 @@ function simulate(I, A, opt) {
       return [k, { c: q.cfg.beitrag * cM / 12, cM, z: 0 }];
     })));
     // Die Beiträge aller Produkte dürfen das Sparbudget nicht übersteigen, sonst werden sie anteilig gekürzt
-    const prodOut = sum(avdIn.map(a => a.cF + a.cU)) + sum(polIn.map(o => o.basis.c + o.prv.c));
+    const prodOut = sum(avdIn.map(a => a.cF + a.cU)) + sum(polIn.map(o => sumPol(o, x => x.c)));
     const budgetCut = prodOut > sparBudget + 0.01 ? sparBudget / prodOut : 1;
     persons.forEach((p, i) => {
       const a = avdIn[i];
@@ -304,16 +311,17 @@ function simulate(I, A, opt) {
       const zk = kgKids.filter(c => c.zulageTo === i).length;
       if (zk > 0 && a.cF >= AVD.minEigen) a.zul += Math.min(a.cF, AVD.kindMax * zk);
     });
-    // Erstattungen des Vorjahres als Zuzahlung: AVD ungefördert bis zum Höchstbeitrag, Basisrente bis zum Rentenbeginn. Rest ins ETF-Depot.
+    // Erstattungen des Vorjahres als Zuzahlung: AVD ungefördert bis zum Höchstbeitrag, Versicherung (Basisrente) bis zum Rentenbeginn. Rest ins ETF-Depot.
     let refundEtf = pendingRefund;
     persons.forEach((p, i) => {
       const a = avdIn[i];
       const zA = a.m > 0 ? Math.min(pendAvd[i], Math.max(0, AVD.einMax * a.m / 12 - a.cF - a.cU)) : 0;
       a.cU += zA; a.zuz = zA; refundEtf += pendAvd[i] - zA;
-      const q = pol[i].basis;
-      const zB = q && !q.s.paying && q.s0 > yearAbs0 ? pendBasis[i] : 0;
-      polIn[i].basis.z = zB; refundEtf += pendBasis[i] - zB;
-      pendAvd[i] = 0; pendBasis[i] = 0;
+      pendAvd[i] = 0;
+      for (const k of POLICIES) {
+        const q = pol[i][k], z = q && !q.s.paying && q.s0 > yearAbs0 ? pendPol[i][k] : 0;
+        polIn[i][k].z = z; refundEtf += pendPol[i][k] - z; pendPol[i][k] = 0;
+      }
     });
 
     // Versicherungen: Ansparjahr bzw. Ansparen bis zum Rentenbeginn und Verrentung
@@ -325,14 +333,13 @@ function simulate(I, A, opt) {
       const alphaY = q.alphaTot * monthsIn(year, Y0 * 12, Y0 * 12 + INS.akvMonths) / INS.akvMonths;
       policySaveYear(q.s, q.cfg, mk.R, { c: io.c, cM: io.cM, z: io.z, alphaY, feeM: mG, mG });
       if (mG < 12) {
-        const teil = k === 'prv' ? (q.cfg.mode === 'kapital' ? 1 : q.cfg.mode === 'teil' ? q.cfg.teil : 0) : 0;
-        policyAnnuitize(q.s, q.cfg, year, teil);
+        policyAnnuitize(q.s, q.cfg, year, teilOf(q.cfg, k));
         if (q.s.lump > 0) { lumps.push({ i, k, amt: q.s.lump, gain: q.s.gain, half: q.half, m: mG }); kvLump[i].push({ amt: q.s.lump, from: q.s0 }); }
       }
     }));
-    // Höchstbetrag für Basisrente: gemeinsamer Höchstbetrag minus Beiträge zur gesetzlichen RV (Angestellte AN- plus AG-Anteil, Selbständige ihr voller Beitrag)
+    // Höchstbetrag für abzugsfähige Versicherungen (Basisrente): gemeinsamer Höchstbetrag minus Beiträge zur gesetzlichen RV (Angestellte AN- plus AG-Anteil, Selbständige ihr voller Beitrag)
     const grvBeitr = sum(persons.map((p, i) => p.rvPflicht && work[i].m > 0 ? L.rvSatz * Math.min(work[i].g, L.bbgRV * work[i].m / 12) : 0));
-    const basisPaid = sum(polIn.map(o => o.basis.c + o.basis.z));
+    const basisPaid = sum(polIn.map(o => sumPol(o, (x, k) => POLICY_DEF[k].deduct ? x.c + x.z : 0)));
     const basisDed = Math.min(basisPaid, Math.max(0, persons.length * hbFor(L) - grvBeitr));
 
     // ── Steuer Erwerbsphase / Grundlage zvE ohne Kapital ──
@@ -372,14 +379,14 @@ function simulate(I, A, opt) {
       const m = monthsIn(year, q.s0, Infinity);
       const gross = policyRent(q.s, q.cfg, year, m);
       let taxable = 0;
-      if (gross > 0 && k === 'basis') {
+      if (gross > 0 && POLICY_DEF[k].rentTax === 'kohorte') {
         taxable = taxablePension(gross, Math.floor(q.s0 / 12), year, q);
       } else if (gross > 0) taxable = gross * ertragsanteil(q.cfg.payStart);
       const W = m > 0 ? gross * monthsIn(year, Math.max(q.s0, wStartAbs), endAbs) / m : 0;
       return [k, { gross, taxable, W }];
     })));
-    const polGross = polPay.map(o => o.basis.gross + o.prv.gross), polW = polPay.map(o => o.basis.W + o.prv.W);
-    const polTaxable = polPay.map(o => o.basis.taxable + o.prv.taxable);
+    const polGross = polPay.map(o => sumPol(o, x => x.gross)), polW = polPay.map(o => sumPol(o, x => x.W));
+    const polTaxable = polPay.map(o => sumPol(o, x => x.taxable));
     // KV-Bemessung freiwillig Versicherter: 1/120 der Kapitalauszahlung je Monat über 10 Jahre
     const lumpKV = kvLump.map(ls => sum(ls.map(l => l.amt / INS.kvLumpMonths * monthsIn(year, l.from, l.from + INS.kvLumpMonths))));
 
@@ -510,7 +517,7 @@ function simulate(I, A, opt) {
 
     // ── Sparphase: ETF-Sparrate ──
     // Beiträge aus dem Budget (ohne Zuzahlungen aus Erstattungen)
-    const avdOut = avdIn.reduce((s, a) => s + a.cF + a.cU - (a.zuz || 0), 0) + sum(polIn.map(o => o.basis.c + o.prv.c));
+    const avdOut = avdIn.reduce((s, a) => s + a.cF + a.cU - (a.zuz || 0), 0) + sum(polIn.map(o => sumPol(o, x => x.c)));
     // Kapitalsteuern werden in der Entnahme aus dem Netto, sonst aus dem Sparbudget bezahlt
     const taxOutside = ev.kt.tax - ev.kt.taxW;
     const taxFromBudget = Math.min(taxOutside, Math.max(0, sparBudget - avdOut + refundEtf));
@@ -521,12 +528,16 @@ function simulate(I, A, opt) {
     // Erstattungen je Person verteilen und fürs Folgejahr vormerken
     const dedPer = avdIn.map(a => a.cF + a.zul);
     const refundPer = persons.map((p, i) => dedSum > 0 ? refund * dedPer[i] / dedSum : 0);
-    const basisRefundPer = persons.map((p, i) => basisPaid > 0 ? basisRefund * (polIn[i].basis.c + polIn[i].basis.z) / basisPaid : 0);
+    const polRefund = persons.map((p, i) => Object.fromEntries(POLICIES.map(k => [k, POLICY_DEF[k].deduct && basisPaid > 0 ? basisRefund * (polIn[i][k].c + polIn[i][k].z) / basisPaid : 0])));
+    const basisRefundPer = polRefund.map(o => sumPol(o, x => x));
     pendingRefund = 0;
     persons.forEach((p, i) => {
-      const to = p.avd.refundTo ?? 'same', tb = p.basis?.refundTo ?? 'same';
+      const to = p.avd.refundTo ?? 'same';
       if (to === 'same') pendAvd[i] += refundPer[i]; else if (to === 'etf') pendingRefund += refundPer[i];
-      if (tb === 'same') pendBasis[i] += basisRefundPer[i]; else if (tb === 'etf') pendingRefund += basisRefundPer[i];
+      for (const k of POLICIES) {
+        const tk = p[k]?.refundTo ?? 'same', r = polRefund[i][k];
+        if (tk === 'same') pendPol[i][k] += r; else if (tk === 'etf') pendingRefund += r;
+      }
     });
     sumZulagen += zulSum; sumRefunds += refund; sumBasisRefund += basisRefund;
 
@@ -547,7 +558,7 @@ function simulate(I, A, opt) {
 
     const dv = depotValue(depot), av = avd.map(avdValue);
     const pv = persons.map((p, i) => Object.fromEntries(POLICIES.map(k => [k, pol[i][k] ? pol[i][k].s.K : 0])));
-    const pvP = pv.map(o => o.basis + o.prv), pvSum = sum(pvP);
+    const pvP = pv.map(o => sumPol(o, x => x)), pvSum = sum(pvP);
 
     // ── Aufteilung nach Personen ──
     // Gemeinsames ETF-Depot, Kredit und Kapitalertragsteuer je zur Hälfte.
@@ -560,14 +571,15 @@ function simulate(I, A, opt) {
       const estShare = taxBaseSum > 0 ? (ev.it.est + ev.it.soli) * taxBase[i] / taxBaseSum : (ev.it.est + ev.it.soli) / np;
       const kvI = ev.kvR.per[i];
       const net = inWithdraw ? grvW[i] + avdW[i] + polW[i] + G / np - estShare * wT - ev.kt.taxW / np - kvI * kvShare[i] - extraInvest / np : 0;
-      return {
+      const o = {
         etf: dv / np, avd: av[i], etfContrib: etfContrib / np, avdReinvest: avdReinvest / np, taxFromBudget: taxFromBudget / np, avdIn: avdIn[i].cF + avdIn[i].cU, zul: avdIn[i].zul,
         refund: refundPer[i], loanPay: loanPay / np, loanSonder: loanSonder / np, budget: budget / np, debt: debt / np, netWorth: (dv - debt) / np + av[i] + pvP[i],
-        basis: pv[i].basis, prv: pv[i].prv, basisIn: polIn[i].basis.c + polIn[i].basis.z, prvIn: polIn[i].prv.c, basisRefund: basisRefundPer[i],
-        basisPay: polPay[i].basis.gross, prvPay: polPay[i].prv.gross, basisPayW: polPay[i].basis.W, prvPayW: polPay[i].prv.W, lump: lumpPer[i], lumpTax: lumpTaxPer[i],
+        basisRefund: basisRefundPer[i], lump: lumpPer[i], lumpTax: lumpTaxPer[i],
         grv: grv[i], avdPay: avdPay[i].gross, etfSale: sellG / np, grvW: grvW[i], avdPayW: avdW[i], estW: estShare * wT, kvW: kvI * kvShare[i], kapTaxW: ev.kt.taxW / np,
         est: estShare, kapTax: ev.kt.tax / np, kv: kvI, net, total: dv / np + av[i] + pvP[i],
       };
+      for (const k of POLICIES) polFields(o, k, pv[i][k], polIn[i][k], polPay[i][k]);
+      return o;
     });
     if (year === wStartYear - 1) startReal = (dv + sum(av) + pvSum - debt) / priceIdx;
     if (inWithdraw && shortfall && !depleted) { depleted = true; depletedYear = year; }
@@ -575,8 +587,7 @@ function simulate(I, A, opt) {
     if (row) Object.assign(row, {
       phase: inWithdraw ? 'Entnahme' : (saveMonths > 0 ? 'Ansparen' : 'Übergang'), saveMonths, wMonths,
       priceIdx, etf: dv, avd: av, total: dv + sum(av) + pvSum,
-      basis: pv.map(o => o.basis), prv: pv.map(o => o.prv), basisIn: polIn.map(o => o.basis.c + o.basis.z), prvIn: polIn.map(o => o.prv.c), basisRefund,
-      basisPay: polPay.map(o => o.basis.gross), prvPay: polPay.map(o => o.prv.gross), basisPayW: polPay.map(o => o.basis.W), prvPayW: polPay.map(o => o.prv.W), lump: lumpPer, lumpTax, budgetCut,
+      basisRefund, lump: lumpPer, lumpTax, budgetCut,
       etfContrib, avdReinvest, taxFromBudget, avdIn: avdIn.map(a => a.cF + a.cU), zulagen: zulSum, refund, loanPay, loanSonder, budget,
       debt, netWorth: dv + sum(av) + pvSum - debt,
       grv, avdPay: avdPay.map(a => a.gross), etfSale: sellG, houseSale: houseG,
@@ -585,10 +596,10 @@ function simulate(I, A, opt) {
       kv: ev.kvR.tot, net: inWithdraw ? netIncome : 0,
       basisDed, ep: [...ep], funds: depot.funds.map(fundValue), pp,
     });
-    if (row) rows.push(row);
+    if (row) { for (const k of POLICIES) polFields(row, k, pv.map(o => o[k]), polIn.map(o => o[k]), polPay.map(o => o[k])); rows.push(row); }
   }
 
-  const polCap = sum(pol.map(o => sum(POLICIES.map(k => o[k] ? o[k].s.K : 0))));
+  const polCap = sum(pol.map(o => sumPol(o, q => q ? q.s.K : 0)));
   const final = depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0) + polCap;
   return {
     rows, depleted, depletedYear, wStartYear, wFullYear, endYear, startReal,

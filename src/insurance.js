@@ -17,7 +17,15 @@ const INS = {
   akvMonths: 60,                   // Abschlusskosten verteilt auf die ersten 5 Jahre (§ 169 Abs. 3 VVG)
   kvLumpMonths: 120,               // Kapitalauszahlung: freiwillig Versicherte zahlen 10 Jahre lang auf 1/120 (Annahme analog § 229 SGB V)
 };
-const POLICIES = ['basis', 'prv'];
+// Versicherungsprodukte: Steuer der Rente (Besteuerungsanteil nach Kohorte § 22 Nr. 1 S. 3 a aa oder Ertragsanteil bb EStG),
+// Kapitaloption, Sonderausgabenabzug (§ 10 Abs. 1 Nr. 2 b EStG). Reihenfolge bleibt fest (Summen in dieser Reihenfolge).
+const POLICY_DEF = {
+  basis: { rentTax: 'kohorte', lump: false, deduct: true },
+  prv:   { rentTax: 'ertragsanteil', lump: true, deduct: false },
+};
+const POLICIES = Object.keys(POLICY_DEF);
+// Ausgezahlter Kapitalanteil bei Rentenbeginn (nur Produkte mit Kapitaloption)
+const teilOf = (cfg, k) => POLICY_DEF[k].lump ? (cfg.mode === 'kapital' ? 1 : cfg.mode === 'teil' ? cfg.teil : 0) : 0;
 
 // Kostenvorlagen (typische Werte aus Muster-PIBs und Tarifvergleichen 2025/2026)
 const INS_PRESETS = {
