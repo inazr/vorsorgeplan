@@ -127,7 +127,7 @@ function depotSell(d, gross, mode, dry) {
 // und ungefördert (Beiträge darüber, nur Ertrag steuerpflichtig)
 // ═══════════════════════════════════════════════════════════════
 function makeAVD() {
-  return { fv: 0, uv: 0, uCost: 0, paying: false };
+  return { fv: 0, uv: 0, uCost: 0, paying: false, startAbs: null };   // startAbs: absoluter Monat des ersten Beitrags
 }
 function avdValue(a) { return a.fv + a.uv; }
 
@@ -145,14 +145,18 @@ function avdSaveYear(a, R, cost, cF, cU, zul, buyT = 0.5) {
 }
 function avdGrow(a, R, cost) { const g = R - cost; a.fv *= (1 + g); a.uv *= (1 + g); }
 
-function avdWithdraw(a, pay) {
+// Hälftelung des ungeförderten Teils: § 22 Nr. 5 S. 2 c EStG verweist auf § 20 Abs. 1 Nr. 6 S. 2 (12 Jahre Laufzeit, ab 62)
+function avdHalf(a, payAbs, P) {
+  return a.startAbs != null && payAbs - a.startAbs >= INS.halfYears * 12 && Math.floor((payAbs - (P.by * 12 + P.bm - 1)) / 12) >= INS.halfAge;
+}
+function avdWithdraw(a, pay, half = false) {
   const tot = avdValue(a);
   pay = Math.min(pay, tot);
   if (pay <= 0) return { gross: 0, taxable: 0 };
   const sF = a.fv / tot, sU = a.uv / tot;
   const pF = pay * sF, pU = pay * sU;
   const uGainRatio = a.uv > 0 ? Math.max(0, (a.uv - a.uCost) / a.uv) : 0;
-  const taxable = pF + pU * uGainRatio;     // §22 Nr. 5 S. 1 voll, S. 2 c nur Unterschiedsbetrag
+  const taxable = pF + pU * uGainRatio * (half ? 0.5 : 1);     // §22 Nr. 5 S. 1 voll, S. 2 c nur Unterschiedsbetrag (ggf. zur Hälfte)
   const costOut = pU * (1 - uGainRatio);
   a.fv -= pF; a.uv -= pU; a.uCost = Math.max(0, a.uCost - costOut);
   return { gross: pay, taxable };

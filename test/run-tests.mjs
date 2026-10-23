@@ -15,9 +15,11 @@ vm.runInContext(`function mk(f) { const I = JSON.parse(JSON.stringify(DEFAULTS))
 const mn = (patch, scen = 'B') => g(`(() => { const { I, A } = mk(${patch || 'null'}); return maxNet(I, A, '${scen}'); })()`);
 
 let fail = 0, ok = 0;
-const GOLD = { baseA: 9080, baseB: 9401, perpetual: 7716, pkv: 9041, freiwillig: 8480, noDraft: 9413, noIndex: 8541, kinderlos: 9364, avdNone: 9320, avdExtra: 9143,
-  basisSame: 8293, basisEtf: 8624, basisNone: 8025, prvKapital: 9332, prvKapital61: 9318, selfRv: 9402, self: 8404, saveLast: 8935, bm7: 9330, loanTeil: 6512,
-  baseB_startReal: 1299706, baseB_finalReal: 167, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
+// Task 12: Hälftelung AVD ungefördert (Erstattungen fließen in uv): baseB 9401 → 9416, perpetual 7716 → 7730, pkv 9041 → 9054, freiwillig 8480 → 8493, noDraft 9413 → 9426, noIndex 8541 → 8572, kinderlos 9364 → 9386, avdExtra 9143 → 9541,
+// basisSame 8293 → 8305, basisEtf 8624 → 8637, basisNone 8025 → 8039, prvKapital 9332 → 9346, prvKapital61 9318 → 9332, selfRv 9402 → 9417, self 8404 → 8417, saveLast 8935 → 8948, bm7 9330 → 9344, loanTeil 6512 → 6520, baseB_finalReal 167 → 155
+const GOLD = { baseA: 9080, baseB: 9416, perpetual: 7730, pkv: 9054, freiwillig: 8493, noDraft: 9426, noIndex: 8572, kinderlos: 9386, avdNone: 9320, avdExtra: 9541,
+  basisSame: 8305, basisEtf: 8637, basisNone: 8039, prvKapital: 9346, prvKapital61: 9332, selfRv: 9417, self: 8417, saveLast: 8948, bm7: 9344, loanTeil: 6520,
+  baseB_startReal: 1299706, baseB_finalReal: 155, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
 const check = (name, cond, info = '') => { if (cond) ok++; else { fail++; console.log('FEHLER', name, info); } };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 // Golden Master: pinnt die heutigen Ergebnisse (±1 €), damit Umbauten keine Werte verschieben
@@ -39,6 +41,17 @@ check('Zulage 120 €', near(g('zulageGrund(120, AVD)'), 60, 1e-9));
 check('Zulage 1.000 €', near(g('zulageGrund(1000, AVD)'), 340, 1e-9));
 check('Zulage 1.800 €', near(g('zulageGrund(1800, AVD)'), 540, 1e-9));
 check('Zulage unter Mindestbeitrag', g('zulageGrund(100, AVD)') === 0);
+// Hälftelung ungeförderter AVD-Topf (§ 22 Nr. 5 S. 2 c EStG)
+const hw = half => g(`(() => { const a = makeAVD(); a.uv = 10000; a.uCost = 6000; return avdWithdraw(a, 1000, ${half}).taxable; })()`);
+check('AVD ungefördert voll: Ertragsanteil 40 %', near(hw(false), 400, 1e-9), hw(false));
+check('AVD ungefördert halbiert: 20 %', near(hw(true), 200, 1e-9), hw(true));
+const hv = (by, ps, st) => g(`(() => { const a = makeAVD(); a.startAbs = ${st}; return avdHalf(a, (${by} + ${ps}) * 12 + 3, { by: ${by}, bm: 3 }); })()`);
+check('avdHalf: 12 Jahre und Alter 62 erfüllt', hv(1990, 67, 2027 * 12) === true);
+check('avdHalf: Laufzeit unter 12 Jahren (1965, Auszahlung 2030)', hv(1965, 65, 2027 * 12) === false);
+check('avdHalf: Alter unter 62', hv(1990, 61, 2027 * 12) === false);
+check('avdHalf: ohne Vertragsbeginn', g('avdHalf(makeAVD(), 2057 * 12, { by: 1990, bm: 3 })') === false);
+const hs = force => g(`(() => { const o = avdHalf; ${force === null ? '' : 'avdHalf = () => ' + force + ';'} try { const { I, A } = mk(p => { p.by = 1965; }); I.persons.forEach(p => { p.by = 1965; p.avd.extra = 3000; p.avd.payStart = 65; }); const s = simulate(I, A, { scenario: 'B', targetReal: 3000, detail: true }); return JSON.stringify(s.rows.map(r => [r.avdPay, r.est])); } finally { avdHalf = o; } })()`);
+check('AVD 1965/2027/65: keine Hälftelung (Laufzeit 3 J.)', hs(null) === hs('false'));
 
 // 4. Annuitätendarlehen: 100.000 € zu 3 % effektiv über 10 Jahre ist danach getilgt
 const rest = g(`(() => { const c = { amount: 100000, eff: 0.03, startY: 2030, startM: 1, monthly: annuityM(100000, loanRateM(0.03), 120), fixEndY: 2045, fixEndM: 1, sonder: 0, after: 'anschluss', zins: 0.03, years: 10 };

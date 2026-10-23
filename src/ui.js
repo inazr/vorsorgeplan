@@ -471,7 +471,7 @@ function legalTable() {
     ['Altersvorsorgedepot', `Sonderausgabenabzug ${eur(AVD.fMax)} + Zulage mit Günstigerprüfung`, 'G', '§ 10a EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', `Selbständige förderberechtigt (unter ${SV.rentenAlter})`, 'G', '§ 10a Abs. 1 S. 5 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', `Auszahlung ab ${AVD.payMin} bis ${AVD.payMax}, Plan bis mind. ${AVD.planEndMin}, bis ${pc(AVD.teilMax, 0)} Einmalbetrag`, 'G', '§ 1 AltZertG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
-    ['Altersvorsorgedepot', 'Auszahlung voll steuerpflichtig, keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
+    ['Altersvorsorgedepot', 'Geförderter Teil voll steuerpflichtig, ungeförderter Teil nur der Ertrag, nach 12 Jahren und ab 62 zur Hälfte; keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 S. 2 c EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'G', '§§ 237, 229 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__237.html'],
     ['Basisrente', `Höchstbetrag ${eur(hb(2026))} je Person (2026), gemeinsam bei Zusammenveranlagung, minus AN- und AG-Beitrag zur GRV`, 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
     ['Basisrente', `Höchstbetrag 2027: ${eur(hb(2027))} (knappschaftliche BBG 130.800 € laut Kabinettsbeschluss)`, 'E', 'SV-Rechengrößenverordnung 2027', ''],

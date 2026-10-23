@@ -266,6 +266,7 @@ function simulate(I, A, opt) {
         const cF = Math.min(cfg.eigen, AVD.fMax) * f;
         const cU = Math.min(cfg.extra, AVD.einMax - Math.min(cfg.eigen, AVD.fMax)) * f;
         avdIn[i] = { cF, cU, zul: 0, m };
+        if (avd[i].startAbs == null && m > 0) avd[i].startAbs = Math.max(2027 * 12, Y0 * 12);   // Vertragsbeginn für die Hälftelung
       });
     }
     // Versicherungsbeiträge (laufend bis Beitragsende)
@@ -336,12 +337,13 @@ function simulate(I, A, opt) {
       const m = monthsIn(year, s0, s1);
       if (m <= 0 || avdValue(a) <= 0) return none;
       let res = { gross: 0, taxable: 0 };
+      const half = avdHalf(a, s0, p);
       if (!a.paying) {
         a.paying = true;
-        if (p.avd.teilkapital > 0) res = avdWithdraw(a, avdValue(a) * p.avd.teilkapital);
+        if (p.avd.teilkapital > 0) res = avdWithdraw(a, avdValue(a) * p.avd.teilkapital, half);
       }
       const left = s1 - Math.max(s0, yearAbs0);
-      const r2 = avdWithdraw(a, left <= m ? avdValue(a) : avdValue(a) * m / left);
+      const r2 = avdWithdraw(a, left <= m ? avdValue(a) : avdValue(a) * m / left, half);
       return { gross: res.gross + r2.gross, taxable: res.taxable + r2.taxable, m, mW: monthsIn(year, Math.max(s0, wStartAbs), Math.min(s1, endAbs)) };
     });
     // Anteile, die in die Entnahmemonate fallen (Renten und KV je Person, Einkommensteuer nach Einkommensanteil)
