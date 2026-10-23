@@ -3,13 +3,36 @@
 // ═══════════════════════════════════════════════════════════════
 const STORE_KEY = 'vorsorgeplan-v1';
 const clone = o => JSON.parse(JSON.stringify(o));
+// Text für innerHTML entschärfen (Werte können aus geladenen Eingaben stammen)
+const esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function deepMerge(base, over) {
   if (Array.isArray(base)) return Array.isArray(over) ? over.map((v, i) => base[i] !== undefined && typeof base[i] === 'object' ? deepMerge(base[i], v) : v) : base;
   if (base && typeof base === 'object') { const o = { ...base }; if (over && typeof over === 'object') for (const k of Object.keys(over)) o[k] = k in base ? deepMerge(base[k], over[k]) : over[k]; return o; }
   return over === undefined ? base : over;
 }
+// Neuer Kredit mit Beispielwerten (auch Vorlage für die Typprüfung geladener Kredite)
+const loanTpl = y => ({ name: 'Darlehen', amount: 300000, eff: 0.035, startY: y, startM: 1, monthly: 1350, freeMonths: 0, fixBalBank: 0,
+  fixEndY: y + 10, fixEndM: 1, sonder: 0, sonderFrom: y, sonderTo: y + 9, after: 'anschluss', zins: 0.04, years: 20, teil: 0 });
+// Erlaubte Werte der Auswahlfelder, nach Feldname
+const ENUMS = { job: ['employee', 'self'], grvMode: ['prognose', 'ep'], kvdr: ['auto', 'ja', 'nein', 'pkv'], mode: ['rente', 'kapital', 'teil'], refundTo: ['same', 'etf', 'none'],
+  optMode: ['fast', 'mc'], strategy: ['realConst', 'perpetual', 'fixedNet'], sellMode: ['newestFirst', 'inOrder'], saveUntil: ['first', 'last'], after: ['anschluss', 'etf', 'teil'], type: ['acc', 'dist'] };
+// Geladene Eingaben an die Form der Standardwerte anpassen: Zahlen, Schalter und Auswahlfelder nur mit gültigen Werten
+function conform(base, val, key) {
+  if (Array.isArray(base)) return Array.isArray(val) ? val.map((v, i) => conform(base[i] ?? base[0] ?? v, v, key)) : base;
+  if (base && typeof base === 'object') {
+    const o = val && typeof val === 'object' ? { ...val } : {};   // unbekannte Schlüssel bleiben für Migrationen erhalten
+    for (const k of Object.keys(base)) o[k] = conform(base[k], val?.[k], k);
+    return o;
+  }
+  if (typeof base === 'number') { const n = Number(val); return val !== null && val !== '' && isFinite(n) ? n : base; }
+  if (typeof base === 'boolean') return typeof val === 'boolean' ? val : base;
+  if (typeof base === 'string') return ENUMS[key] ? (ENUMS[key].includes(val) ? val : base) : (val == null ? base : String(val));
+  return val === undefined ? base : val;
+}
+const TPL_I = { ...DEFAULTS, loans: [loanTpl(2026)] };
+const loadState = p => ({ I: conform(TPL_I, deepMerge(clone(DEFAULTS), p.I)), A: conform(ASSUME, deepMerge(clone(ASSUME), p.A)) });
 let ST = { I: clone(DEFAULTS), A: clone(ASSUME) };
-try { const s = localStorage.getItem(STORE_KEY); if (s) { const p = JSON.parse(s); ST = { I: deepMerge(clone(DEFAULTS), p.I), A: deepMerge(clone(ASSUME), p.A) }; } } catch (e) { }
+try { const s = localStorage.getItem(STORE_KEY); if (s) ST = loadState(JSON.parse(s)); } catch (e) { }
 // Optionale Migration gespeicherter Eingaben (nur in der privaten Version definiert)
 if (typeof MIGRATE === 'function') { try { MIGRATE(ST); } catch (e) { } }
 ST.I.loans = ST.I.loans || [];
@@ -38,11 +61,11 @@ function F(path, label, o = {}) {
   return `<div class="f"><label for="${idOf(path)}">${label}</label><div class="in"><input id="${idOf(path)}" type="number" inputmode="decimal" data-path="${path}" data-t="${t}" value="${shown}" step="${o.step ?? (t === 'pct' ? 0.1 : t === 'eur' ? 100 : 1)}"${o.min != null ? ` min="${o.min}"` : ''}${o.max != null ? ` max="${o.max}"` : ''}${o.rr ? ' data-rr="1"' : ''}>${unit ? `<span class="u">${unit}</span>` : ''}</div>${o.h ? `<div class="h">${o.h}</div>` : ''}</div>`;
 }
 function T(path, label, o = {}) {
-  return `<div class="f"><label for="${idOf(path)}">${label}</label><div class="in"><input id="${idOf(path)}" type="text" data-path="${path}" data-t="text" value="${String(getP(path)).replace(/"/g, '&quot;')}"${o.rr ? ' data-rr="1"' : ''}></div></div>`;
+  return `<div class="f"><label for="${idOf(path)}">${label}</label><div class="in"><input id="${idOf(path)}" type="text" data-path="${path}" data-t="text" value="${esc(getP(path))}"${o.rr ? ' data-rr="1"' : ''}></div></div>`;
 }
 function S(path, label, opts, o = {}) {
   const v = getP(path);
-  return `<div class="f"><label for="${idOf(path)}">${label}</label><div class="in"><select id="${idOf(path)}" data-path="${path}" data-t="sel"${o.rr ? ' data-rr="1"' : ''}>${opts.map(([val, l]) => `<option value="${JSON.stringify(val).replace(/"/g, '&quot;')}"${val === v ? ' selected' : ''}>${l}</option>`).join('')}</select></div>${o.h ? `<div class="h">${o.h}</div>` : ''}</div>`;
+  return `<div class="f"><label for="${idOf(path)}">${label}</label><div class="in"><select id="${idOf(path)}" data-path="${path}" data-t="sel"${o.rr ? ' data-rr="1"' : ''}>${opts.map(([val, l]) => `<option value="${JSON.stringify(val).replace(/"/g, '&quot;')}"${val === v ? ' selected' : ''}>${esc(l)}</option>`).join('')}</select></div>${o.h ? `<div class="h">${o.h}</div>` : ''}</div>`;
 }
 function C(path, label, o = {}) {
   return `<label class="chk"><input type="checkbox" id="${idOf(path)}" data-path="${path}" data-t="bool"${getP(path) ? ' checked' : ''}${o.rr ? ' data-rr="1"' : ''}>${label}</label>`;
@@ -157,7 +180,7 @@ function personCard(i) {
   const P = ST.I.persons[i], b = `I.persons.${i}`;
   const job = P.job === 'employee';
   return `<div class="card">
-    <div class="card-h"><h2>${P.name}</h2></div>
+    <div class="card-h"><h2>${esc(P.name)}</h2></div>
     <div class="fields">
       ${T(b + '.name', 'Name', { rr: 1 })}
       ${S(b + '.job', 'Erwerbsart', [['employee', 'Angestellt'], ['self', 'Selbständig']], { rr: 1 })}
@@ -192,7 +215,7 @@ function personCard(i) {
 function loanCard(k) {
   const L = ST.I.loans[k], b = `I.loans.${k}`;
   return `<div class="fund">
-    <div class="fund-h"><span style="flex:1">${L.name}</span><button class="btn" data-loan-del="${k}">Entfernen</button></div>
+    <div class="fund-h"><span style="flex:1">${esc(L.name)}</span><button class="btn" data-loan-del="${k}">Entfernen</button></div>
     <div class="fields three">
       ${T(b + '.name', 'Bezeichnung', { rr: 1 })}
       ${F(b + '.amount', 'Darlehensbetrag', { t: 'eur', step: 1000 })}
@@ -240,7 +263,7 @@ function renderP0() {
       </div>
       <div class="card-h"><h3>Kinder</h3><button class="btn" id="btn-kid-add">Kind hinzufügen</button></div>
       ${I.children.map((c, k) => `<div class="fund">
-        <div class="fund-h"><span style="flex:1">${c.name}</span><button class="btn" data-kid-del="${k}">Entfernen</button></div>
+        <div class="fund-h"><span style="flex:1">${esc(c.name)}</span><button class="btn" data-kid-del="${k}">Entfernen</button></div>
         <div class="fields three">
           ${T(`I.children.${k}.name`, 'Name', { rr: 1 })}
           ${S(`I.children.${k}.bm`, 'Geburtsmonat', monOpts)}
@@ -255,8 +278,7 @@ function renderP0() {
   $$('[data-kid-del]').forEach(b => b.onclick = () => { ST.I.children.splice(+b.dataset.kidDel, 1); save(); renderPanels(); scheduleRecalc(); });
   $('#btn-loan-add').onclick = () => {
     const y = Math.max(ST.I.startYear, 2026);
-    ST.I.loans.push({ name: 'Darlehen ' + (ST.I.loans.length + 1), amount: 300000, eff: 0.035, startY: y, startM: 1, monthly: 1350, freeMonths: 0, fixBalBank: 0,
-      fixEndY: y + 10, fixEndM: 1, sonder: 0, sonderFrom: y, sonderTo: y + 9, after: 'anschluss', zins: 0.04, years: 20, teil: 0 });
+    ST.I.loans.push({ ...loanTpl(y), name: 'Darlehen ' + (ST.I.loans.length + 1) });
     save(); renderPanels(); scheduleRecalc();
   };
   $$('[data-loan-del]').forEach(b => b.onclick = () => { ST.I.loans.splice(+b.dataset.loanDel, 1); save(); renderPanels(); scheduleRecalc(); });
@@ -372,7 +394,7 @@ function renderFacts() {
     ];
     const cols = [...I.persons.map((p, i) => i), -1];
     $('#budget-sub').textContent = `${r.year} · pro Monat · nominal`;
-    bt.innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : I.persons[c].name}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f]) => `<tr><td class="txt">${l}</td>${cols.map(c => `<td>${eur(f(c) / 12)}</td>`).join('')}</tr>`).join('')}
+    bt.innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(I.persons[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f]) => `<tr><td class="txt">${l}</td>${cols.map(c => `<td>${eur(f(c) / 12)}</td>`).join('')}</tr>`).join('')}
       <tr style="border-top:2px solid var(--line-2)"><td class="txt"><b>Budget</b></td>${cols.map(c => `<td><b>${eur((c < 0 ? r.budget : r.budget / n) / 12)}</b></td>`).join('')}</tr></tbody></table>`
       + (R.simB.rows.some(x => x.budgetCut < 0.999) ? `<p class="note" style="margin:8px"><span class="pill warn">Budget reicht nicht</span> Die Beiträge der Vorsorgeprodukte sind höher als das Budget nach Kreditraten. In diesen Jahren werden alle Beiträge anteilig gekürzt.</p>` : '');
   }
@@ -393,7 +415,7 @@ const REFUND_OPTS = (k) => [['same', k === 'avd' ? 'ins AVD (ungefördert)' : 'i
 function avdCard(i) {
   const P = ST.I.persons[i], b = `I.persons.${i}.avd`;
   return `<div class="card">
-    <div class="card-h"><h2>Altersvorsorgedepot ${P.name}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
+    <div class="card-h"><h2>Altersvorsorgedepot ${esc(P.name)}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${P.avd.on ? `<div class="fields">
       ${F(b + '.eigen', 'Geförderter Eigenbeitrag', { t: 'eur', u: '€/Jahr', step: 60, min: 0, max: 1800, h: 'Maximal 1.800 €. Mindestens 120 € für Zulagen.' })}
       ${F(b + '.extra', 'Zusätzlich ungefördert', { t: 'eur', u: '€/Jahr', step: 120, min: 0, max: 5040, h: 'Bis 6.840 € insgesamt. Später wird nur der Ertrag besteuert.' })}
@@ -403,7 +425,7 @@ function avdCard(i) {
       ${S(b + '.payEnd', 'Auszahlungsplan bis Alter', yearOpts(85, 100))}
       ${S(b + '.refundTo', 'Steuererstattung § 10a fließt', REFUND_OPTS('avd'), { h: 'Steuerersparnis über der Zulage, kommt im Folgejahr' })}
     </div>
-    <div class="facts" id="avdfacts-${i}"></div>` : '<p class="note">' + P.name + ' spart nicht ins Altersvorsorgedepot.</p>'}
+    <div class="facts" id="avdfacts-${i}"></div>` : '<p class="note">' + esc(P.name) + ' spart nicht ins Altersvorsorgedepot.</p>'}
   </div>`;
 }
 // Kostenfelder wie im Produktinformationsblatt, mit Vorlagen
@@ -424,7 +446,7 @@ function costFields(b, cfg) {
 function basisCard(i) {
   const P = ST.I.persons[i], b = `I.persons.${i}.basis`, c = P.basis;
   return `<div class="card">
-    <div class="card-h"><h2>Basisrente ${P.name}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
+    <div class="card-h"><h2>Basisrente ${esc(P.name)}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${c.on ? `<div class="fields three">
       ${F(b + '.beitrag', 'Beitrag', { t: 'eur', u: '€/Jahr', step: 300, min: 0 })}
       ${S(b + '.payStart', 'Rente ab Alter', yearOpts(62, 70), { h: 'Frühestens mit 62' })}
@@ -437,7 +459,7 @@ function basisCard(i) {
 function prvCard(i) {
   const P = ST.I.persons[i], b = `I.persons.${i}.prv`, c = P.prv;
   return `<div class="card">
-    <div class="card-h"><h2>Private Rentenversicherung ${P.name}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
+    <div class="card-h"><h2>Private Rentenversicherung ${esc(P.name)}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${c.on ? `<div class="fields three">
       ${F(b + '.beitrag', 'Beitrag', { t: 'eur', u: '€/Jahr', step: 300, min: 0 })}
       ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(60, 75), { h: 'Hälftelung erst ab 62 und nach 12 Jahren' })}
@@ -618,8 +640,8 @@ function optFmt(k, v) {
   if (k === 'on') return v ? 'ja' : 'nein';
   if (['eigen', 'extra', 'beitrag'].includes(k)) return eur(v) + '/Jahr';
   if (k === 'teilkapital') return pc(v, 0);
-  if (k === 'mode') return { rente: 'Rente', kapital: 'Kapital', teil: 'Teilkapital + Rente' }[v];
-  return v + ' Jahre';
+  if (k === 'mode') return { rente: 'Rente', kapital: 'Kapital', teil: 'Teilkapital + Rente' }[v] ?? esc(v);
+  return esc(v) + ' Jahre';
 }
 function runOptimizer() {
   const b = $('#btn-opt'); b.disabled = true; $('#btn-opt-stop').hidden = false;
@@ -644,7 +666,7 @@ function renderOptResult() {
     const keys = Object.keys(OPT_LAB[k]).filter(f => f === 'on' || (uC || uO) && (OPT_AMOUNT[k].includes(f) || uO));
     keys.forEach(f => {
       const o = f === 'on' ? prodUsed(p, k) : cur[f], v = f === 'on' ? prodUsed({ [k]: opt }, k) : opt[f];
-      rows.push(`<tr><td>${p.name}</td><td class="txt">${PROD[k]}</td><td class="txt">${OPT_LAB[k][f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
+      rows.push(`<tr><td>${esc(p.name)}</td><td class="txt">${PROD[k]}</td><td class="txt">${OPT_LAB[k][f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
     });
   }));
   const d = (R.netO ?? 0) - (R.netB ?? 0);
@@ -662,7 +684,7 @@ function renderP2() {
   <div class="row">
     <span class="muted">Details für</span>
     <div class="seg" id="seg-scen">${['A', 'B', 'O'].map(k => `<button data-v="${k}" aria-pressed="${chartScen === k}"${k === 'O' && !OPT ? ' disabled title="Erst den Optimierer im Reiter Strategie starten"' : ''}>${SCN[k]}</button>`).join('')}</div>
-    <div class="seg" id="seg-person"><button data-v="-1" aria-pressed="${chartPerson === -1}">Haushalt</button>${names.map((n, i) => `<button data-v="${i}" aria-pressed="${chartPerson === i}">${n}</button>`).join('')}</div>
+    <div class="seg" id="seg-person"><button data-v="-1" aria-pressed="${chartPerson === -1}">Haushalt</button>${names.map((n, i) => `<button data-v="${i}" aria-pressed="${chartPerson === i}">${esc(n)}</button>`).join('')}</div>
     <span class="spacer"></span>
     <div class="seg" id="seg-real"><button data-v="1" aria-pressed="${chartReal}">Heutige Kaufkraft</button><button data-v="0" aria-pressed="${!chartReal}">Nominal</button></div>
   </div>
@@ -728,7 +750,7 @@ function chartOf(id) {
 const tipRow = (label, v, strong) => `<span${strong ? ' style="font-weight:700"' : ''}>${label}</span><span style="text-align:right;font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:${strong ? 700 : 600}">${v == null ? '–' : eur(v)}</span>`;
 const tipSum = ps => tipRow('Summe', ps.reduce((a, p) => a + (p.value || 0), 0), true);
 const tip = (title, rows) => `<b>${title}</b><div style="display:grid;grid-template-columns:auto auto;column-gap:16px;row-gap:2px;margin-top:4px">${rows.join('')}</div>`;
-const tipSeries = ps => ps.map(p => tipRow(`${p.marker}${p.seriesName}`, p.value));
+const tipSeries = ps => ps.map(p => tipRow(`${p.marker}${esc(p.seriesName)}`, p.value));
 function baseOpt(extra = {}) {
   const ink2 = cssv('--ink-2'), ink3 = cssv('--ink-3'), line = cssv('--line'), surf = cssv('--surface');
   return {
@@ -775,7 +797,7 @@ function renderWho(sim) {
     ['Netto pro Monat', who => '<b>' + m(V(r, 'net', who)) + '</b>', 'sub'],
   ];
   $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal`;
-  $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : P[c].name}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, cls]) => `<tr${cls === 'sub' ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(P[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, cls]) => `<tr${cls === 'sub' ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 function renderCharts() {
   if (!R) return;
@@ -979,7 +1001,7 @@ $('#btn-io').onclick = () => { $('#io').hidden = false; $('#io-text').value = JS
 $('#io-close').onclick = () => { $('#io').hidden = true; };
 $('#io-copy').onclick = async () => { const t = $('#io-text'); try { await navigator.clipboard.writeText(t.value); $('#io-msg').textContent = 'Kopiert.'; } catch (e) { t.select(); $('#io-msg').textContent = 'Text ist markiert. Mit Strg+C oder Cmd+C kopieren.'; } };
 $('#io-load').onclick = () => {
-  try { const p = JSON.parse($('#io-text').value); ST = { I: deepMerge(clone(DEFAULTS), p.I), A: deepMerge(clone(ASSUME), p.A) }; save(); renderPanels(); recalc(); $('#io-msg').textContent = 'Übernommen.'; }
+  try { ST = loadState(JSON.parse($('#io-text').value)); save(); renderPanels(); recalc(); $('#io-msg').textContent = 'Übernommen.'; }
   catch (e) { $('#io-msg').textContent = 'Der Text ist kein gültiger Export. Bitte den ganzen Text einfügen.'; }
 };
 let resetArm = null;

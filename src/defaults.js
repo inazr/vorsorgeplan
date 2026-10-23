@@ -39,5 +39,5 @@ const ASSUME = {
   basiszins: 0.032, indexTariff: true, useDraft: true, guenstiger: true,
   zusatz: 0.029, zusatzDrift: 0.0003, pvDrift: 0.0002,
   kvTeilfreistellung: false,
-  optMode: 'fast', optQ: 0.1,   // Optimierer: schnell (feste Rendite) oder Monte Carlo (Perzentil)
+  mcRuns: 200, optMode: 'fast', optQ: 0.1,   // Optimierer: schnell (feste Rendite) oder Monte Carlo (Perzentil)
 };
