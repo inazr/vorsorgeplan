@@ -160,7 +160,7 @@ function personCard(i) {
     <div class="fields">
       ${S(b + '.grvMode', 'Berechnung', [['prognose', 'Prognose aus Renteninfo'], ['ep', 'Entgeltpunkte bisher']], { rr: 1 })}
       ${P.grvMode === 'prognose'
-        ? F(b + '.grvPrognose', 'Prognose laut Renteninfo', { t: 'eur', u: '€/Monat', step: 10 }) + F(b + '.grvRwInfo', 'Rentenwert zum Ausstellungsdatum', { t: 'num', step: 0.01, u: '€', h: 'Ab 1.7.2025: 40,79 €. Ab 1.7.2026: 42,52 €.' })
+        ? F(b + '.grvPrognose', 'Prognose laut Renteninfo', { t: 'eur', u: '€/Monat', step: 10 }) + F(b + '.grvRwInfo', 'Rentenwert zum Ausstellungsdatum', { t: 'num', step: 0.01, u: '€', h: Object.keys(SV.rw).sort().map(y => `Ab 1.7.${y}: ${SV.rw[y].toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €.`).join(' ') })
         : F(b + '.epNow', 'Entgeltpunkte bisher', { t: 'num', step: 0.1, h: 'Steht in der Renteninfo. Kindererziehungszeiten sind dort schon enthalten.' }) + `<div class="f">${C(b + '.rvPflicht', 'Zahlt weiter Pflichtbeiträge')}</div>`}
     </div>
     <h3>Krankenversicherung im Alter</h3>
