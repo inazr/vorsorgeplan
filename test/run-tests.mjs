@@ -17,9 +17,10 @@ const mn = (patch, scen = 'B') => g(`(() => { const { I, A } = mk(${patch || 'nu
 let fail = 0, ok = 0;
 // Task 12: Hälftelung AVD ungefördert (Erstattungen fließen in uv): baseB 9401 → 9416, perpetual 7716 → 7730, pkv 9041 → 9054, freiwillig 8480 → 8493, noDraft 9413 → 9426, noIndex 8541 → 8572, kinderlos 9364 → 9386, avdExtra 9143 → 9541,
 // basisSame 8293 → 8305, basisEtf 8624 → 8637, basisNone 8025 → 8039, prvKapital 9332 → 9346, prvKapital61 9318 → 9332, selfRv 9402 → 9417, self 8404 → 8417, saveLast 8935 → 8948, bm7 9330 → 9344, loanTeil 6512 → 6520, baseB_finalReal 167 → 155
-const GOLD = { baseA: 9080, baseB: 9416, perpetual: 7730, pkv: 9054, freiwillig: 8493, noDraft: 9426, noIndex: 8572, kinderlos: 9386, avdNone: 9320, avdExtra: 9541,
-  basisSame: 8305, basisEtf: 8637, basisNone: 8039, prvKapital: 9346, prvKapital61: 9332, selfRv: 9417, self: 8417, saveLast: 8948, bm7: 9344, loanTeil: 6520,
-  baseB_startReal: 1299706, baseB_finalReal: 155, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
+// Task 13: Rentenwert gilt ab 1.7. (Jan-Jun Vorjahreswert), Netto sinkt leicht, baseA 9080 → 9041, baseB 9416 → 9378, perpetual 7730 → 7693, pkv 9054 → 9007, freiwillig 8493 → 8455, noDraft 9426 → 9389, noIndex 8572 → 8542, kinderlos 9386 → 9349, avdNone 9320 → 9283, avdExtra 9541 → 9505, basisSame 8305 → 8270, basisEtf 8637 → 8601, basisNone 8039 → 8002, prvKapital 9346 → 9309, prvKapital61 9332 → 9295, selfRv 9417 → 9379, self 8417 → 8392, saveLast 8948 → 8914, bm7 9344 → 9308, loanTeil 6520 → 6481, baseB_finalReal 155 → 164
+const GOLD = { baseA: 9041, baseB: 9378, perpetual: 7693, pkv: 9007, freiwillig: 8455, noDraft: 9389, noIndex: 8542, kinderlos: 9349, avdNone: 9283, avdExtra: 9505,
+  basisSame: 8270, basisEtf: 8601, basisNone: 8002, prvKapital: 9309, prvKapital61: 9295, selfRv: 9379, self: 8392, saveLast: 8914, bm7: 9308, loanTeil: 6481,
+  baseB_startReal: 1299706, baseB_finalReal: 164, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
 const check = (name, cond, info = '') => { if (cond) ok++; else { fail++; console.log('FEHLER', name, info); } };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 // Golden Master: pinnt die heutigen Ergebnisse (±1 €), damit Umbauten keine Werte verschieben
@@ -141,7 +142,7 @@ check('Optimum-Patch', o.b === 4800 && o.p === false && o.inc, JSON.stringify(o)
 
 // ─── Tests für bisher ungetestete Pfade (halten das heutige Verhalten fest) ───
 // Engine-Funktionen und Konstanten für Tests in Node (Funktionen/Konstanten des vm-Kontexts)
-const E = g('({ simulate, maxNet, monthsIn, retireStartAbs, monthsRetired, avdPayStartAbs, depotYear, depotSell, makeDepot, kapTax, lawYear, makeLoans, loanMonth, loanPreview, annuityM, loanRateM, absM, tariffFor, lawPick, idxVal, rwFor, SV, AVD, LAW, mk })');
+const E = g('({ simulate, maxNet, monthsIn, retireStartAbs, monthsRetired, avdPayStartAbs, depotYear, depotSell, makeDepot, kapTax, lawYear, makeLoans, loanMonth, loanPreview, annuityM, loanRateM, absM, tariffFor, lawPick, idxVal, rwJul, grvYear, SV, AVD, LAW, mk })');
 const sumA = a => a.reduce((x, y) => x + y, 0);
 
 // 12. Entnahmestrategien: ewige Rente, festes Netto, Erschöpfung
@@ -274,8 +275,12 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('lawPick mit Entwurf: 2027', E.lawPick(lt, 2030, true).v === 2 && E.lawPick(lt, 2030, true).y === 2027);
   check('lawPick vor erstem Jahr: erster Eintrag', E.lawPick(E.LAW.tariff, 2025).y === 2026);
   check('lawPick anPausch', E.lawPick(E.LAW.pausch.anPausch, 2030, true).v === 1430 && E.lawPick(E.LAW.pausch.anPausch, 2030, false).v === 1230);
-  const A0 = g('ASSUME'), r = y => E.rwFor(y, A0) / E.rwFor(y - 1, A0);
-  check('rwFor: ab 2032 gedämpftes Wachstum', near(r(2031), 1 + A0.wageGrowth, 1e-12) && near(r(2032), 1 + A0.wageGrowth - A0.rentenDaempfung, 1e-12) && r(2032) < r(2031));
+  const A0 = g('ASSUME'), r = y => E.rwJul(y, A0) / E.rwJul(y - 1, A0);
+  check('rwJul: ab 2032 gedämpftes Wachstum', near(r(2031), 1 + A0.wageGrowth, 1e-12) && near(r(2032), 1 + A0.wageGrowth - A0.rentenDaempfung, 1e-12) && r(2032) < r(2031));
+  check('rwJul: Tabellenwerte 2025/2026', E.rwJul(2026, A0) === 42.52 && E.rwJul(2025, A0) === 40.79);
+  check('grvYear 2026 ab Jahresbeginn: 6 Monate alter, 6 Monate neuer Rentenwert', near(E.grvYear(1, 1, 2026, 0, A0), 6 * 40.79 + 6 * 42.52, 1e-9));
+  check('grvYear Rentenbeginn Oktober: nur neuer Rentenwert', near(E.grvYear(2, 0.9, 2030, 2030 * 12 + 9, A0), 2 * 0.9 * 3 * E.rwJul(2030, A0), 1e-9));
+  check('grvYear Rentenbeginn April: 3 Monate alt, 6 neu', near(E.grvYear(1, 1, 2030, 2030 * 12 + 3, A0), 3 * E.rwJul(2029, A0) + 6 * E.rwJul(2030, A0), 1e-9));
 }
 
 // 19. KV der Rentner: KVdR ohne Beiträge auf AVD-Auszahlungen, freiwillig mit

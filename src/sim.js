@@ -9,6 +9,7 @@ const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohne
   bez: { 2026: 47460, 2027: 49560 },         // Bezugsgröße p.a.
   rw: { 2025: 40.79, 2026: 42.52 },          // aktueller Rentenwert ab 1.7.
   rvAN: 0.093, kvGen: 0.146, kvErm: 0.140, pv: 0.036, pvKinderlos: 0.006,
+  halteBis: 2031,                            // Ende der Haltelinie 48 %, danach Rentendämpfung
   rentenAlter: 67,
 };
 
@@ -17,11 +18,18 @@ function idxVal(table, year, growth) { // Wert aus Tabelle, danach mit growth fo
   return v * Math.pow(1 + growth, Math.max(0, year - base));
 }
 
-// Rentenwert: Anpassung = Lohnwachstum, nach Ende der Haltelinie (2031) gedämpft
-function rwFor(year, A) {
-  let rw = SV.rw[2026];
-  for (let y = 2027; y <= year; y++) rw *= 1 + A.wageGrowth - (y > 2031 ? A.rentenDaempfung : 0);
+// Rentenwert ab 1.7. des Jahres y: Tabelle, danach Anpassung = Lohnwachstum, nach der Haltelinie gedämpft
+function rwJul(y, A) {
+  const ys = Object.keys(SV.rw).map(Number), last = Math.max(...ys);
+  if (y <= last) return SV.rw[ys.includes(y) ? y : Math.min(...ys)]; // vor der Tabelle: erster Eintrag
+  let rw = SV.rw[last];
+  for (let k = last + 1; k <= y; k++) rw *= 1 + A.wageGrowth - (k > SV.halteBis ? A.rentenDaempfung : 0);
   return rw;
+}
+// Jahresrente aus e Entgeltpunkten: Monate Jan-Jun mit dem Wert ab 1.7. des Vorjahres, Jul-Dez mit dem neuen Wert; ab Monat fromAbs
+function grvYear(e, zf, year, fromAbs, A) {
+  const h1 = monthsIn(year, fromAbs, year * 12 + 6), h2 = monthsIn(year, Math.max(fromAbs, year * 12 + 6), Infinity);
+  return e * zf * (h1 * rwJul(year - 1, A) + h2 * rwJul(year, A));
 }
 function lawYear(year, A, priceIdx) {
   const { p, idx } = tariffFor(year, { useDraft: A.useDraft, indexTariff: A.indexTariff, inflation: A.inflation });
@@ -34,7 +42,7 @@ function lawYear(year, A, priceIdx) {
     kfb: kd.kfb * kIdx, kg: kd.kg * kIdx * 12,
     anPausch: lawPick(LAW.pausch.anPausch, year, A.useDraft).v * kIdx,
     bbgRV: idxVal(SV.bbgRV, year, w), bbgKV: idxVal(SV.bbgKV, year, w), de: idxVal(SV.de, year, w),
-    rw: rwFor(year, A), bez: idxVal(SV.bez, year, w),
+    bez: idxVal(SV.bez, year, w),
     zus: A.zusatz + A.zusatzDrift * Math.max(0, year - 2026),
     pv: SV.pv + A.pvDrift * Math.max(0, year - 2026),
     basiszins: (LAW.basiszins[year] ?? A.basiszins * 100) / 100,
@@ -209,11 +217,10 @@ function simulate(I, A, opt) {
       const m = monthsRetired(p, year);
       if (m <= 0) return 0;
       const e = p.grvMode === 'prognose' ? p.grvPrognose / p.grvRwInfo : ep[i];
-      return e * zugangsfaktor(p) * L.rw * m;
+      return grvYear(e, zugangsfaktor(p), year, retireStartAbs(p), A);
     });
     const grvTaxable = grv.map((g, i) => {
       if (g <= 0) return 0;
-      const ba = LAW.besteuerungsanteil(renteStartY[i]);
       return taxablePension(g, renteStartY[i], year, renteFB[i]);
     });
 
