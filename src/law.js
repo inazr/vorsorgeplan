@@ -20,7 +20,7 @@ const LAW = {
     2026: { kfb: 9756, kg: 259, st: 'G' }, 2027: { kfb: 10056, kg: 267, st: 'E' }, 2028: { kfb: 10236, kg: 272, st: 'E' },
   },
   pausch: { anPausch: { 2026: 1230, 2027: 1430 }, rentnerWK: 102, sonderausg: 72 },
-  abgSt: 0.25, soliKap: 0.055, sparerPB: 2000, teilfreistellungAktien: 0.30,
+  abgSt: 0.25, soliKap: 0.055, sparerPB: 2000,
   basiszins: { 2023: 2.55, 2024: 2.29, 2025: 2.53, 2026: 3.20 },
   // Besteuerungsanteil Renten nach Wachstumschancengesetz
   besteuerungsanteil(y) {

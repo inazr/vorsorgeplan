@@ -140,7 +140,7 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('perpetual: Netto unter realConst', nP < nR, `${nP} / ${nR}`);
   const f1 = E.mk((I, A) => { I.withdraw.strategy = 'fixedNet'; I.withdraw.fixedNet = 2500; });
   const s1 = E.simulate(f1.I, f1.A, { scenario: 'B', targetReal: 0, detail: true });
-  const ent = s1.rows.filter(r => r.phase === 'Entnahme' && !r.shortfall);
+  const ent = s1.rows.filter(r => r.phase === 'Entnahme');
   check('fixedNet 2500: Netto = Wunsch · Monate · Preisindex', ent.length > 25 && ent.every(r => near(r.net, 2500 * r.wMonths * r.priceIdx, 1)), ent.length);
   check('fixedNet 2500: nicht erschöpft', !s1.depleted);
   const f2 = E.mk((I, A) => { I.withdraw.strategy = 'fixedNet'; I.withdraw.fixedNet = 20000; });
@@ -206,9 +206,12 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   const nl = d.funds[0].lots[1], u = 1000 / (100 * Math.pow(1.1, 0.5));
   check('Zwölftelung der Vorabpauschale bei neuer Tranche', near(nl.units, u, 1e-9) && near(nl.vp, 2.1 * u * 0.5, 1e-9) && near(d.funds[0].lots[0].vp, 21, 1e-9), JSON.stringify(nl));
   // FIFO: älteste Tranche (Kosten 50) zuerst ganz, dann die Hälfte der zweiten (Kosten 90 + vp 10)
-  const mkLots = () => { const x = dep({}, 0); x.funds[0].lots.push({ y: 2020, units: 1, cost: 50, vp: 0 }, { y: 2021, units: 1, cost: 90, vp: 10 }); return x; };
+  const mkLots = (vp1 = 0) => { const x = dep({}, 0); x.funds[0].lots.push({ y: 2020, units: 1, cost: 50, vp: vp1 }, { y: 2021, units: 1, cost: 90, vp: 10 }); return x; };
   d = mkLots(); const dry = E.depotSell(d, 150, 'newestFirst', true);
-  check('depotSell FIFO: Gewinn und Teilfreistellung', near(dry.gain, 50, 1e-9) && near(dry.taxable, 35, 1e-9) && near(dry.sold, 150, 1e-9), JSON.stringify(dry));
+  check('depotSell FIFO: Gewinn und Teilfreistellung (vp nur auf Tranche 2)', near(dry.gain, 50, 1e-9) && near(dry.taxable, 35, 1e-9) && near(dry.sold, 150, 1e-9), JSON.stringify(dry));
+  // vp auf beiden Tranchen (je 10): Tranche 1 Gewinn 100 - 60 = 40, Tranche 2 zur Hälfte 50 - 50 = 0
+  const dry2 = E.depotSell(mkLots(10), 150, 'newestFirst', true);
+  check('depotSell FIFO: vp auf beiden Tranchen', near(dry2.gain, 40, 1e-9) && near(dry2.taxable, 28, 1e-9) && near(dry2.sold, 150, 1e-9), JSON.stringify(dry2));
   check('depotSell dry ändert den Bestand nicht', d.funds[0].lots.length === 2 && d.funds[0].lots[0].units === 1);
   E.depotSell(d, 150, 'newestFirst', false);
   check('depotSell: Bestand nach Verkauf', d.funds[0].lots.length === 1 && near(d.funds[0].lots[0].units, 0.5, 1e-9) && near(d.funds[0].lots[0].cost, 45, 1e-9) && near(d.funds[0].lots[0].vp, 5, 1e-9));
@@ -265,8 +268,6 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('KVdR: KV in A und B gleich (AVD ohne Beitrag)', ent.length > 25 && ent.every(k => ja[k].pp.every((p, i) => near(p.kv, jaA[k].pp[i].kv, 0.01))));
   const k0 = ja.findIndex(r => r.avdPay[0] > 0);
   check('Freiwillig: KV mit AVD-Auszahlung höher als KVdR', k0 >= 0 && nein[k0].pp[0].kv > ja[k0].pp[0].kv + 1, `${nein[k0]?.pp[0].kv} / ${ja[k0]?.pp[0].kv}`);
-  const risk = kvs('ja', 'B', A => { A.kvAvdKvdr = true; });
-  check('Risikoschalter kvAvdKvdr: KVdR zahlt auf AVD', risk[k0].pp[0].kv > ja[k0].pp[0].kv + 1, `${risk[k0].pp[0].kv} / ${ja[k0].pp[0].kv}`);
 }
 
 // 20. Zufallspfade und Monte Carlo (asynchron, eigener Kontext mit setTimeout und Date)

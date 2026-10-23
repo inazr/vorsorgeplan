@@ -2,7 +2,6 @@
 // JAHRESSIMULATION: eine Engine für Einzelrechnung, Optimierer und Monte Carlo
 // ═══════════════════════════════════════════════════════════════
 const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohnentwicklung
-  base: 2026,
   bbgRV: { 2026: 101400, 2027: 106200 },
   bbgKV: { 2026: 69750, 2027: 76500 },       // 2027 inkl. Sonderanhebung BStabG
   de: { 2026: 51944, 2027: 53452 },          // Durchschnittsentgelt (vorläufig)
@@ -62,7 +61,8 @@ function incomeTax(zvE, nKids, L) {
     if (eK + kg < e0) est = eK + kg; // Freibetrag günstiger: Kindergeld wird hinzugerechnet
     soliBase = eK;
   }
-  return { est, soli: soliOf(soliBase, L), total: est + soliOf(soliBase, L) };
+  const soli = soliOf(soliBase, L);
+  return { est, soli, total: est + soli };
 }
 
 // Kapitalertragsteuer mit Pauschbetrag (Freistellungsauftrag), Verlustvortrag, optional Günstigerprüfung
@@ -123,7 +123,6 @@ function kvdrCheck(P, nKidsAll = P.kidsForKvdr ?? 0) {
 // ═══════════════════════════════════════════════════════════════
 function simulate(I, A, opt) {
   const Y0 = I.startYear;
-  const [S, W] = I.persons;
   const persons = I.persons;
   const useAVD = opt.scenario !== 'A';   // in Szenario A bleiben alle Vorsorgeprodukte aus
   const firstRet = Math.min(...persons.map(retireStartAbs));
@@ -160,10 +159,9 @@ function simulate(I, A, opt) {
   const pb = I.depot.freistellung ?? LAW.sparerPB;   // Freistellungsauftrag für das ETF-Depot
 
   let priceIdx = 1, pendingKap = 0, pendingRefund = 0, depleted = false, depletedYear = null;
-  let sumZulagen = 0, sumRefunds = 0, sumKapTax = 0, sumVP = 0, houseSale = null, sumBasisRefund = 0, sumLumpTax = 0;
+  let sumZulagen = 0, sumRefunds = 0, houseSale = null, sumBasisRefund = 0;
   const rows = [];
   const sum = a => a.reduce((x, y) => x + y, 0);
-  let minNetRatio = Infinity;
   let startReal = I.depot.startValue;   // reales Nettovermögen zu Entnahmebeginn (Ende des Vorjahres)
 
   for (let year = Y0; year <= endYear; year++) {
@@ -182,7 +180,8 @@ function simulate(I, A, opt) {
       pvAb += 0.0025 * Math.min(4, Math.max(0, k25 - 1)) / 12;
     }
     const childless = I.children.length === 0;
-    const row = opt.detail ? { year, ages: persons.map(p => ageAt(p, year)), R: mk.R } : null;
+    const pvZu = -pvAb + (childless ? SV.pvKinderlos : 0);   // Abschlag/Zuschlag auf den PV-Satz
+    const row = opt.detail ? { year, ages: persons.map(p => ageAt(p, year)) } : null;
 
     // ── Erwerbseinkommen (anteilig bis Rentenbeginn) ──
     const work = persons.map((p, i) => {
@@ -215,10 +214,10 @@ function simulate(I, A, opt) {
       const bbgKV = L.bbgKV * w.m / 12, bbgRV = L.bbgRV * w.m / 12;
       if (p.job === 'employee') {
         if (p.rvPflicht) vorsorge += SV.rvAN * Math.min(w.g, bbgRV);
-        vorsorge += ((SV.kvGen + L.zus) / 2 * (p.krankengeld ? 0.96 : 1) + L.pv / 2 - pvAb + (childless ? SV.pvKinderlos : 0)) * Math.min(w.g, bbgKV);
+        vorsorge += ((SV.kvGen + L.zus) / 2 * (p.krankengeld ? 0.96 : 1) + L.pv / 2 + pvZu) * Math.min(w.g, bbgKV);
       } else {
         const rate = p.krankengeld ? SV.kvGen : SV.kvErm;
-        vorsorge += ((rate + L.zus) * (p.krankengeld ? 0.96 : 1) + L.pv - pvAb + (childless ? SV.pvKinderlos : 0)) * Math.min(w.g, bbgKV);
+        vorsorge += ((rate + L.zus) * (p.krankengeld ? 0.96 : 1) + L.pv + pvZu) * Math.min(w.g, bbgKV);
       }
     });
 
@@ -230,11 +229,11 @@ function simulate(I, A, opt) {
     const inW = a => a >= wStartAbs && a < endAbs;
 
     // Budget und Kredit
-    let loanPay = 0, loanSonder = 0, loanPayoff = 0, loanInterest = 0, loanInSave = 0, loanInW = 0, payoffInW = 0;
+    let loanPay = 0, loanSonder = 0, loanPayoff = 0, loanInSave = 0, loanInW = 0, payoffInW = 0;
     const payoffs = [];
     for (const l of loans) for (let m = 0; m < 12; m++) {
       const a = yearAbs0 + m, o = loanMonth(l, a, false);
-      loanPay += o.pay + o.sonder; loanSonder += o.sonder; loanPayoff += o.payoff; loanInterest += o.interest;
+      loanPay += o.pay + o.sonder; loanSonder += o.sonder; loanPayoff += o.payoff;
       if (a < saveEndAbs) loanInSave += o.pay + o.sonder;
       if (inW(a)) { loanInW += o.pay + o.sonder; payoffInW += o.payoff; }
       else if (o.payoff > 0) payoffs.push({ l, amt: o.payoff });
@@ -310,9 +309,7 @@ function simulate(I, A, opt) {
     const basisDed = Math.min(basisPaid, Math.max(0, persons.length * idxVal(INS.hb, year, A.wageGrowth) - grvBeitr));
 
     // ── Steuer Erwerbsphase / Grundlage zvE ohne Kapital ──
-    const zvEBase = (p => p)(
-      persons.reduce((s, p, i) => s + (p.job === 'employee' ? Math.max(0, work[i].g - (work[i].m > 0 ? L.anPausch : 0)) : work[i].g), 0)
-    );
+    const zvEBase = persons.reduce((s, p, i) => s + (p.job === 'employee' ? Math.max(0, work[i].g - (work[i].m > 0 ? L.anPausch : 0)) : work[i].g), 0);
 
     // §10a Günstigerprüfung
     let refund = 0;
@@ -373,7 +370,7 @@ function simulate(I, A, opt) {
         const m = monthsRetired(p, year);
         if (m <= 0) return;
         const f = m / 12, bbg = L.bbgKV * f;
-        const pvRate = L.pv - pvAb + (childless ? SV.pvKinderlos : 0);
+        const pvRate = L.pv + pvZu;
         if (kv[i].pkv) {   // Private KV: Beitrag unabhängig vom Einkommen, Zuschuss der DRV (§ 106 SGB VI) max. halber Beitrag
           const g = Math.pow(1 + (p.pkvGrowth ?? 0.03), year - 2026);
           const prem = Math.max(0, (p.pkvPremium - (p.pkvRelief || 0)) * g) * 12 * f;
@@ -384,10 +381,8 @@ function simulate(I, A, opt) {
         }
         const bR = Math.min(grv[i], bbg);
         let c = bR * ((SV.kvGen + L.zus) / 2 + pvRate);   // KVdR und freiwillig: DRV trägt die Hälfte der KV
-        if (kv[i].ok && A.kvAvdKvdr) {   // Risikoschalter: KVdR zahlt künftig Beiträge auf AVD-Auszahlungen (wie Versorgungsbezüge)
-          const rest = Math.max(0, bbg - bR);
-          c += Math.min(avdPay[i].gross, rest) * (SV.kvGen + L.zus + pvRate);
-        }
+        // KVdR-Pflichtversicherte: nach § 237 SGB V zählen nur Rente, Versorgungsbezüge (§ 229) und Arbeitseinkommen.
+        // Das AVD gehört zur privaten Vorsorge und steht nicht im Katalog des § 229 (betrieblich nimmt § 229 Abs. 1 Nr. 5 Altersvorsorgevermögen nach § 92 EStG sogar aus).
         if (!kv[i].ok) {
           const rest = Math.max(0, bbg - bR);
           // Freiwillig: Beiträge auch auf Versicherungsrenten (voller Zahlbetrag) und Kapitalauszahlungen
@@ -431,7 +426,7 @@ function simulate(I, A, opt) {
 
     if (inWithdraw) {
       if (I.withdraw.strategy !== 'fixedNet') target = opt.targetReal * wMonths * priceIdx;
-      else if (I.withdraw.strategy === 'fixedNet') target = I.withdraw.fixedNet * wMonths * (I.withdraw.fixedIndexed ? priceIdx : 1);
+      else target = I.withdraw.fixedNet * wMonths * (I.withdraw.fixedIndexed ? priceIdx : 1);
       target += loanInW + payoffInW;   // Kreditraten und Ablösung in den Entnahmemonaten zusätzlich
       const netOf = g => { const e = evalYear(g, true); return { net: grossW + g - e.it.total * wT - e.kt.taxW - sum(e.kvR.per.map((c, i) => c * kvShare[i])), e }; };
       const n0 = netOf(0);
@@ -504,7 +499,7 @@ function simulate(I, A, opt) {
       if (to === 'same') pendAvd[i] += refundPer[i]; else if (to === 'etf') pendingRefund += refundPer[i];
       if (tb === 'same') pendBasis[i] += basisRefundPer[i]; else if (tb === 'etf') pendingRefund += basisRefundPer[i];
     });
-    sumZulagen += zulSum; sumRefunds += refund; sumKapTax += ev.kt.tax; sumBasisRefund += basisRefund; sumLumpTax += lumpTax;
+    sumZulagen += zulSum; sumRefunds += refund; sumBasisRefund += basisRefund;
 
     // ── Markt: ETF-Depot ──
     const wm0 = Math.max(0, wStartAbs - yearAbs0), wm1 = Math.min(12, endAbs - yearAbs0);
@@ -512,7 +507,6 @@ function simulate(I, A, opt) {
     // Ausschüttungen brutto in aktiven Fonds (FIFO-Staffelung)
     if (dy.reinvestGross > 0) depotBuy(depot, I.depot.divRedirect ? dy.activeIdx : 0, dy.reinvestGross, year);
     pendingKap = dy.distTaxable + dy.vpTaxable;
-    sumVP += dy.vp;
 
     // ── Markt: Altersvorsorgedepot ──
     persons.forEach((p, i) => {
@@ -548,30 +542,30 @@ function simulate(I, A, opt) {
     });
     if (year === wStartYear - 1) startReal = (dv + sum(av) + pvSum - debt) / priceIdx;
     if (inWithdraw && shortfall && !depleted) { depleted = true; depletedYear = year; }
-    if (inWithdraw && target > 0) minNetRatio = Math.min(minNetRatio, netIncome / target);
 
     if (row) Object.assign(row, {
       phase: inWithdraw ? 'Entnahme' : (saveMonths > 0 ? 'Ansparen' : 'Übergang'), saveMonths, wMonths,
-      priceIdx, etf: dv, etfCost: depotCost(depot), avd: av, total: dv + sum(av) + pvSum,
+      priceIdx, etf: dv, avd: av, total: dv + sum(av) + pvSum,
       basis: pv.map(o => o.basis), prv: pv.map(o => o.prv), basisIn: polIn.map(o => o.basis.c + o.basis.z), prvIn: polIn.map(o => o.prv.c), basisRefund,
       basisPay: polPay.map(o => o.basis.gross), prvPay: polPay.map(o => o.prv.gross), basisPayW: polPay.map(o => o.basis.W), prvPayW: polPay.map(o => o.prv.W), lump: lumpPer, lumpTax, budgetCut,
-      etfContrib, avdReinvest, taxFromBudget, avdIn: avdIn.map(a => a.cF + a.cU), zulagen: zulSum, refund, loanPay, loanSonder, loanInterest, budget,
+      etfContrib, avdReinvest, taxFromBudget, avdIn: avdIn.map(a => a.cF + a.cU), zulagen: zulSum, refund, loanPay, loanSonder, budget,
       debt, netWorth: dv + sum(av) + pvSum - debt,
-      grv, grvTaxable, avdPay: avdPay.map(a => a.gross), etfSale: sellG, houseSale: houseG,
+      grv, avdPay: avdPay.map(a => a.gross), etfSale: sellG, houseSale: houseG,
       grvW, avdPayW: avdW, estW: (ev.it.est + ev.it.soli) * wT, kapTaxW: ev.kt.taxW, kvW: sum(ev.kvR.per.map((c, i) => c * kvShare[i])),
-      zvE: ev.zvE, est: ev.it.est, soli: ev.it.soli, kapTax: ev.kt.tax, guenstiger: ev.kt.guenstiger,
-      kv: ev.kvR.tot, vp: dy.vp, dist: dy.dist, net: inWithdraw ? netIncome : 0, target, shortfall,
+      est: ev.it.est, soli: ev.it.soli, kapTax: ev.kt.tax,
+      kv: ev.kvR.tot, net: inWithdraw ? netIncome : 0,
       ep: [...ep], funds: depot.funds.map(fundValue), pp,
     });
     if (row) rows.push(row);
   }
 
-  function polCap() { return sum(pol.map(o => sum(POLICIES.map(k => o[k] ? o[k].s.K : 0)))); }
+  const polCap = sum(pol.map(o => sum(POLICIES.map(k => o[k] ? o[k].s.K : 0))));
+  const final = depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0) + polCap;
   return {
-    rows, depleted, depletedYear, wStartYear, wFullYear, endYear, minNetRatio, startReal,
-    finalReal: (depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0) + polCap() - loans.reduce((a, l) => a + l.bal, 0)) / priceIdx,
-    final: depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0) + polCap(),
-    kv, sumZulagen, sumRefunds, sumKapTax, sumVP, houseSale, loans, sumBasisRefund, sumLumpTax,
+    rows, depleted, depletedYear, wStartYear, wFullYear, endYear, startReal,
+    finalReal: (final - loans.reduce((a, l) => a + l.bal, 0)) / priceIdx,
+    final,
+    kv, sumZulagen, sumRefunds, houseSale, loans, sumBasisRefund,
     pol: pol.map(o => Object.fromEntries(POLICIES.map(k => [k, o[k] && { ...o[k].s, s0: o[k].s0, half: o[k].half }]))),
     ep,
   };
@@ -579,17 +573,3 @@ function simulate(I, A, opt) {
 
 // AVD-Parameter (AltVRefG, verkündet BGBl. 2026 I Nr. 156)
 const AVD = { g1: 0.5, g1Cap: 360, g2: 0.25, fMax: 1800, minEigen: 120, kindMax: 300, einMax: 6840, payMin: 65, payMax: 70, planEndMin: 85, teilMax: 0.3 };
-
-// ═══════════════════════════════════════════════════════════════
-// Höchstes nachhaltiges reales Netto: Bisektion über das Ziel
-// ═══════════════════════════════════════════════════════════════
-function solveMaxNet(I, A, scenario, path) {
-  let lo = 0, hi = 30000;
-  for (let k = 0; k < 28; k++) {
-    const mid = (lo + hi) / 2;
-    const r = simulate(I, A, { scenario, targetReal: mid, path });
-    if (r.depleted) hi = mid; else lo = mid;
-    if (hi - lo < 1) break;
-  }
-  return lo;
-}

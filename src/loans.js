@@ -9,7 +9,7 @@ const annuityM = (bal, rM, n) => n <= 0 ? bal : rM > 0 ? bal * rM / (1 - Math.po
 const absM = (y, m) => y * 12 + (m - 1);
 
 function makeLoans(cfgs, simStartAbs) {
-  const st = cfgs.map(c => ({ c, bal: c.amount, rM: loanRateM(c.eff), pay: c.monthly, phase: 'fix', fixBal: null, postRate: 0, postEnd: null, interestTotal: 0 }));
+  const st = cfgs.map(c => ({ c, bal: c.amount, rM: loanRateM(c.eff), pay: c.monthly, phase: 'fix', fixBal: null, postRate: 0, interestTotal: 0 }));
   // Vergangenheit bis Simulationsstart abspulen (ohne Sondertilgungen)
   for (const l of st) for (let a = absM(l.c.startY, l.c.startM); a < simStartAbs; a++) loanMonth(l, a, true);
   return st;
@@ -24,7 +24,6 @@ function loanMonth(l, a, past) {
     if (l.c.after === 'etf') { out.payoff = l.bal; l.bal = 0; l.phase = 'done'; return out; }
     if (l.c.after === 'teil') { const x = Math.min(l.c.teil, l.bal); out.payoff = x; l.bal -= x; }
     l.phase = 'post'; l.rM = loanRateM(l.c.zins); l.pay = annuityM(l.bal, l.rM, l.c.years * 12); l.postRate = l.pay;
-    l.postEnd = a + l.c.years * 12;
     if (l.bal <= 0.005) { l.phase = 'done'; return out; }
   }
   const i = l.bal * l.rM;

@@ -470,7 +470,7 @@ function legalTable() {
     ['Altersvorsorgedepot', 'Selbständige förderberechtigt (unter 67)', 'G', '§ 10a Abs. 1 S. 5 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', 'Auszahlung ab 65 bis 70, Plan bis mind. 85, bis 30 % Einmalbetrag', 'G', '§ 1 AltZertG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', 'Auszahlung voll steuerpflichtig, keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
-    ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'A', 'Praxis wie Riester, nicht ausdrücklich geregelt', 'https://www.gesetze-im-internet.de/sgb_5/__229.html'],
+    ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'G', '§§ 237, 229 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__237.html'],
     ['Basisrente', 'Höchstbetrag 30.826 € je Person (2026), gemeinsam bei Zusammenveranlagung, minus AN- und AG-Beitrag zur GRV', 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
     ['Basisrente', 'Höchstbetrag 2027: 32.308 € (knappschaftliche BBG 130.800 € laut Kabinettsbeschluss)', 'E', 'SV-Rechengrößenverordnung 2027', ''],
     ['Basisrente', 'Rente frühestens ab 62, Besteuerung wie gesetzliche Rente', 'G', '§ 22 Nr. 1 S. 3 a aa EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],

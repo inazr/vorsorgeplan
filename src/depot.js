@@ -5,7 +5,7 @@
 // Lot.vp = Summe der Vorabpauschalen (vor Teilfreistellung) der Besitzzeit, mindert den späteren Gewinn (§19 InvStG)
 
 function makeDepot(cfg) {
-  const funds = cfg.funds.map(f => ({ ...f, price: 100, lots: [], lastY: null, totalIn: 0 }));
+  const funds = cfg.funds.map(f => ({ ...f, price: 100, lots: [], lastY: null }));
   // Bestand: als Tranche im ersten Fonds, Einstandswert separat
   if (cfg.startValue > 0) {
     const f0 = funds[0];
@@ -19,11 +19,6 @@ function depotValue(d) {
   let v = 0;
   for (const f of d.funds) for (const l of f.lots) v += l.units * f.price;
   return v;
-}
-function depotCost(d) {
-  let c = 0;
-  for (const f of d.funds) for (const l of f.lots) c += l.cost + l.vp;
-  return c;
 }
 function fundValue(f) { let v = 0; for (const l of f.lots) v += l.units * f.price; return v; }
 
@@ -57,7 +52,7 @@ function depotYear(d, year, R, contrib, basiszins, opts) {
       const buyT = opts.buyT ?? 0.5;
       const pMid = p0 * Math.pow(Math.max(0.01, 1 + g), buyT);
       newLot = { y: year, units: contrib / pMid, cost: contrib, vp: 0 };
-      f.lots.push(newLot); f.lastY = year; f.totalIn += contrib; out.contrib += contrib;
+      f.lots.push(newLot); f.lastY = year; out.contrib += contrib;
     }
     // Kursentwicklung und Ausschüttung (am Jahresende, aus dem Kurs heraus)
     const pPre = p0 * (1 + g);
@@ -91,7 +86,6 @@ function depotBuy(d, idx, amount, year) {
   const f = d.funds[idx];
   f.lots.push({ y: year, units: amount / f.price, cost: amount, vp: 0 });
   f.lastY = Math.max(f.lastY ?? year, year);
-  f.totalIn += amount;
 }
 
 // Reihenfolge der Fonds beim Verkauf: zuletzt besparter Fonds zuerst (FIFO-Staffelung)
@@ -133,7 +127,7 @@ function depotSell(d, gross, mode, dry) {
 // und ungefördert (Beiträge darüber, nur Ertrag steuerpflichtig)
 // ═══════════════════════════════════════════════════════════════
 function makeAVD() {
-  return { fv: 0, uv: 0, uCost: 0, contribF: 0, zulagen: 0, refunds: 0, paying: false, planEnd: null, startBal: 0, done: false };
+  return { fv: 0, uv: 0, uCost: 0, paying: false };
 }
 function avdValue(a) { return a.fv + a.uv; }
 
@@ -147,18 +141,10 @@ function avdSaveYear(a, R, cost, cF, cU, zul, buyT = 0.5) {
   const g = R - cost, gc = Math.pow(Math.max(0.01, 1 + g), 1 - buyT);
   a.fv = a.fv * (1 + g) + cF * gc + zul;
   a.uv = a.uv * (1 + g) + cU * gc;
-  a.uCost += cU; a.contribF += cF; a.zulagen += zul;
+  a.uCost += cU;
 }
 function avdGrow(a, R, cost) { const g = R - cost; a.fv *= (1 + g); a.uv *= (1 + g); }
 
-// Auszahlungsplan: Restkapital / Restjahre (gesetzlich: Rest durch Restmonate)
-function avdPayout(a, yearsLeft, teilkapital) {
-  const tot = avdValue(a);
-  if (tot <= 0) return { gross: 0, taxable: 0 };
-  let pay = yearsLeft <= 1 ? tot : tot / yearsLeft;
-  if (teilkapital > 0) pay += (tot - pay) * 0; // Platzhalter, Teilkapital separat
-  return avdWithdraw(a, pay);
-}
 function avdWithdraw(a, pay) {
   const tot = avdValue(a);
   pay = Math.min(pay, tot);
