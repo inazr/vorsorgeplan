@@ -643,7 +643,7 @@ function renderOptResult() {
   el.innerHTML = `<p>${stale ? '<span class="pill warn">veraltet</span> Eingaben haben sich seit dem Lauf geändert. ' : ''}Optimum: <b class="num">${eur(R.netO ?? OPT.net)}</b>/Monat bei fester Rendite, das sind <b class="num">${(d >= 0 ? '+' : '') + eur(d)}</b> gegenüber deiner Aufteilung.${mc}</p>
     <div class="tablebox"><table><thead><tr><th>Person</th><th>Produkt</th><th>Stellschraube</th><th>Jetzt</th><th>Optimum</th></tr></thead><tbody>${rows.join('')}</tbody></table></div>
     <div class="row" style="margin-top:8px"><button class="btn primary" id="btn-opt-apply">Optimum übernehmen</button></div>`;
-  $('#btn-opt-apply').onclick = () => { OPT.patch.forEach((pp, i) => Object.assign(ST.I.persons[i], clone(pp))); save(); renderPanels(); recalc(); };
+  $('#btn-opt-apply').onclick = () => { ST.I = applyPatch(ST.I, OPT.patch); save(); renderPanels(); recalc(); };
 }
 
 // ═══ Reiter 3: Entwicklung ═══
@@ -912,7 +912,7 @@ function renderTable(sim) {
 function runMC() {
   const b = $('#btn-mc'); b.disabled = true; MC = null;
   const variants = [{ key: 'A', I: ST.I, scenario: 'A' }, { key: 'B', I: ST.I, scenario: 'B' }, ...(OPT ? [{ key: 'O', I: applyPatch(ST.I, OPT.patch), scenario: 'B' }] : [])];
-  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns, seed: 7, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
+  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns, seed: MC_SEED, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
 }
 function renderMC() {
   const r = MC, qs = [0.1, 0.25, 0.5, 0.75, 0.9];

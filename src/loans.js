@@ -8,8 +8,9 @@ const loanRateM = eff => Math.pow(1 + eff, 1 / 12) - 1;
 const annuityM = (bal, rM, n) => n <= 0 ? bal : rM > 0 ? bal * rM / (1 - Math.pow(1 + rM, -n)) : bal / n;
 const absM = (y, m) => y * 12 + (m - 1);
 
+const makeLoanState = c => ({ c, bal: c.amount, rM: loanRateM(c.eff), pay: c.monthly, phase: 'fix', fixBal: null, postRate: 0, interestTotal: 0 });
 function makeLoans(cfgs, simStartAbs) {
-  const st = cfgs.map(c => ({ c, bal: c.amount, rM: loanRateM(c.eff), pay: c.monthly, phase: 'fix', fixBal: null, postRate: 0, interestTotal: 0 }));
+  const st = cfgs.map(makeLoanState);
   // Vergangenheit bis Simulationsstart abspulen (ohne Sondertilgungen)
   for (const l of st) for (let a = absM(l.c.startY, l.c.startM); a < simStartAbs; a++) loanMonth(l, a, true);
   return st;
@@ -42,7 +43,7 @@ function loanMonth(l, a, past) {
 
 // Vorschau für die Oberfläche: Restschuld heute, bei Zinsbindungsende, Anschlussrate, Zinsen
 function loanPreview(c, todayAbs) {
-  const l = { c, bal: c.amount, rM: loanRateM(c.eff), pay: c.monthly, phase: 'fix', fixBal: null, postRate: 0, interestTotal: 0 };
+  const l = makeLoanState(c);
   let today = null, payoff = 0, end = null;
   const fixAbs = absM(c.fixEndY, c.fixEndM);
   for (let a = absM(c.startY, c.startM); a < fixAbs + 600; a++) {

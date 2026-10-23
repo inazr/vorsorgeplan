@@ -51,7 +51,7 @@ const OPT_AMOUNT = { avd: ['eigen', 'extra'], basis: ['beitrag'], prv: ['beitrag
 const optUsed = (p, k) => OPT_AMOUNT[k].some(f => p[k][f] > 0);
 // Ausgangspunkt: alle Produkte eingeschaltet, nicht genutzte mit Beitrag 0
 function optStart(I) {
-  const J = JSON.parse(JSON.stringify(I));
+  const J = clone(I);
   for (const p of J.persons) for (const k of Object.keys(OPT_SPACE)) {
     if (!p[k].on) for (const f of OPT_AMOUNT[k]) p[k][f] = 0;
     p[k].on = true;
@@ -60,27 +60,46 @@ function optStart(I) {
 }
 // Ergebnis: Produkte ohne Beitrag wieder ausschalten
 function optFinish(J) {
-  const K = JSON.parse(JSON.stringify(J));
+  const K = clone(J);
   for (const p of K.persons) for (const k of Object.keys(OPT_SPACE)) if (!optUsed(p, k)) p[k].on = false;
   return K;
 }
 // Produkt-Einstellungen eines Optimums auf aktuelle Eingaben übertragen
-function optPatch(J) { return J.persons.map(p => Object.fromEntries(Object.keys(OPT_SPACE).map(k => [k, JSON.parse(JSON.stringify(p[k]))]))); }
+function optPatch(J) { return J.persons.map(p => Object.fromEntries(Object.keys(OPT_SPACE).map(k => [k, clone(p[k])]))); }
 function applyPatch(I, patch) {
-  const J = JSON.parse(JSON.stringify(I));
-  patch.forEach((pp, i) => { if (J.persons[i]) for (const k of Object.keys(pp)) J.persons[i][k] = JSON.parse(JSON.stringify(pp[k])); });
+  const J = clone(I);
+  patch.forEach((pp, i) => { if (J.persons[i]) for (const k of Object.keys(pp)) J.persons[i][k] = clone(pp[k]); });
   return J;
+}
+
+const OPT_SEED = 11, MC_SEED = 7;   // feste Startwerte, damit Läufe reproduzierbar sind
+const horizonYears = I => I.persons[I.withdraw.refPerson ?? 0].by + I.withdraw.targetAge - I.startYear + 1;
+
+// Arbeit in ~60-ms-Häppchen: next() führt einen Schritt aus und liefert false, wenn alles erledigt ist.
+// onStep nach jedem Häppchen, onDone am Ende. Rückgabe: { cancel() }
+function chunked(next, onStep, onDone) {
+  let cancelled = false;
+  function tick() {
+    if (cancelled) return;
+    const t0 = Date.now();
+    let more = true;
+    while (more && Date.now() - t0 < 60) more = next() !== false;
+    onStep && onStep();
+    if (cancelled) return;
+    if (more) setTimeout(tick, 0); else onDone && onDone();
+  }
+  setTimeout(tick, 0);
+  return { cancel() { cancelled = true; } };
 }
 
 // opts.mode: 'fast' (feste Rendite) | 'mc' (q-Perzentil über opts.runs Verläufe, verfeinert das schnelle Optimum)
 // onStep(fortschritt, bestes Netto, Phase), onDone(bestes I, Netto, Info). Rückgabe: { cancel() }
 function optimize(I, A, opts, onStep, onDone) {
-  opts = { mode: 'fast', q: 0.1, runs: 50, seed: 11, ...opts };
-  let best = optStart(I), cancelled = false, paths = null;
+  opts = { mode: 'fast', q: 0.1, runs: 50, seed: OPT_SEED, ...opts };
+  let best = optStart(I), paths = null;
   const phases = [{ obj: (J, g) => maxNet(J, A, 'B', null, g), passes: 2, w: opts.mode === 'mc' ? 0.25 : 1, name: 'Schnell' }];
   if (opts.mode === 'mc') {
-    const years = I.persons[I.withdraw.refPerson ?? 0].by + I.withdraw.targetAge - I.startYear + 1;
-    paths = makePaths(opts.runs, years, A, opts.seed);
+    paths = makePaths(opts.runs, horizonYears(I), A, opts.seed);
     phases.push({ obj: (J, g) => pctNet(J, A, 'B', paths, opts.q, g), passes: 1, w: 0.75, name: 'Monte Carlo' });
   }
   let ph = 0, tasks = [], ti = 0, bestVal = 0, done0 = 0;
@@ -93,31 +112,27 @@ function optimize(I, A, opts, onStep, onDone) {
     ti = 0; bestVal = P.obj(best, bestVal);
   }
   startPhase();
-  function step() {
-    if (cancelled) return;
-    const P = phases[ph], t0 = Date.now();
-    while (ti < tasks.length && Date.now() - t0 < 60) {
-      const { i, k, key, v } = tasks[ti++];
-      const p = best.persons[i];
-      if (p[k][key] === v) continue;
-      if (!OPT_AMOUNT[k].includes(key) && !optUsed(p, k)) continue;   // Auszahlungsoptionen nur bei genutztem Produkt
-      const cand = JSON.parse(JSON.stringify(best));
-      cand.persons[i][k][key] = v;
-      const n = P.obj(cand, bestVal);
-      if (n > bestVal + 0.5) { best = cand; bestVal = n; }
+  function next() {
+    while (ti >= tasks.length) {   // Phase fertig: nächste starten oder Ende
+      if (ph + 1 >= phases.length) return false;
+      done0 += phases[ph].w; ph++; startPhase();
     }
-    onStep && onStep(done0 + P.w * ti / tasks.length, bestVal, P.name);
-    if (ti < tasks.length) setTimeout(step, 0);
-    else if (++ph < phases.length) { done0 += P.w; startPhase(); setTimeout(step, 0); }
-    else {
-      const J = optFinish(best);
-      // Monte Carlo: dasselbe Perzentil auch für deine Aufteilung und nur ETF, auf denselben Verläufen
-      const mc = paths ? { pct: bestVal, pctB: pctNet(I, A, 'B', paths, opts.q), pctA: pctNet(I, A, 'A', paths, opts.q) } : {};
-      onDone && onDone(J, maxNet(J, A, 'B'), { mode: opts.mode, q: opts.q, runs: opts.runs, ...mc });
-    }
+    const P = phases[ph], { i, k, key, v } = tasks[ti++];
+    const p = best.persons[i];
+    if (p[k][key] === v) return true;
+    if (!OPT_AMOUNT[k].includes(key) && !optUsed(p, k)) return true;   // Auszahlungsoptionen nur bei genutztem Produkt
+    const cand = clone(best);
+    cand.persons[i][k][key] = v;
+    const n = P.obj(cand, bestVal);
+    if (n > bestVal + 0.5) { best = cand; bestVal = n; }
+    return true;
   }
-  setTimeout(step, 0);
-  return { cancel() { cancelled = true; } };
+  return chunked(next, () => { const P = phases[ph]; onStep && onStep(done0 + P.w * ti / tasks.length, bestVal, P.name); }, () => {
+    const J = optFinish(best);
+    // Monte Carlo: dasselbe Perzentil auch für deine Aufteilung und nur ETF, auf denselben Verläufen
+    const mc = paths ? { pct: bestVal, pctB: pctNet(I, A, 'B', paths, opts.q), pctA: pctNet(I, A, 'A', paths, opts.q) } : {};
+    onDone && onDone(J, maxNet(J, A, 'B'), { mode: opts.mode, q: opts.q, runs: opts.runs, ...mc });
+  });
 }
 
 // Zufallszahlen mit Startwert, damit Läufe reproduzierbar sind
@@ -142,28 +157,26 @@ function makePaths(n, years, A, seed) {
 // Monte Carlo: je Pfad das maximal tragbare Netto, plus Vermögensfächer beim deterministischen Plan.
 // variants: [{ key, I, scenario }] (nur ETF, deine Aufteilung, Optimum) auf denselben Verläufen
 function monteCarlo(I, A, opts, onStep, onDone) {
-  const years = I.persons[I.withdraw.refPerson ?? 0].by + I.withdraw.targetAge - I.startYear + 1;
-  const paths = makePaths(opts.runs, years, A, opts.seed);
+  const years = horizonYears(I);
+  const paths = makePaths(opts.runs, years, A, opts.seed ?? MC_SEED);
   const vs = opts.variants || [{ key: 'A', I, scenario: 'A' }, { key: 'B', I, scenario: 'B' }];
   const det = {}, res = {}, fan = {}, fail = {};
-  for (const v of vs) { det[v.key] = maxNet(v.I, A, v.scenario); res[v.key] = []; fan[v.key] = []; fail[v.key] = 0; }
-  let k = 0;
-  function step() {
-    const t0 = Date.now();
-    while (k < paths.length && Date.now() - t0 < 60) {
-      const path = paths[k++];
-      for (const v of vs) {
-        res[v.key].push(maxNet(v.I, A, v.scenario, path, det[v.key]));
-        const r = simulate(v.I, A, { scenario: v.scenario, targetReal: det[v.key], path, detail: true });
-        if (r.depleted || !keepsCapital(v.I, r)) fail[v.key]++;
-        fan[v.key].push(r.rows.map(x => x.total / x.priceIdx));
-      }
+  for (const v of vs) { res[v.key] = []; fan[v.key] = []; fail[v.key] = 0; }
+  let k = 0, d = 0;   // d: Zähler der vorab nötigen deterministischen maxNet-Läufe (erste Schritte)
+  function next() {
+    if (d < vs.length) { const v = vs[d++]; det[v.key] = maxNet(v.I, A, v.scenario); return true; }
+    if (k >= paths.length) return false;
+    const path = paths[k++];
+    for (const v of vs) {
+      res[v.key].push(maxNet(v.I, A, v.scenario, path, det[v.key]));
+      const r = simulate(v.I, A, { scenario: v.scenario, targetReal: det[v.key], path, detail: true });
+      if (r.depleted || !keepsCapital(v.I, r)) fail[v.key]++;
+      fan[v.key].push(r.rows.map(x => x.total / x.priceIdx));
     }
-    onStep && onStep(k / paths.length);
-    if (k < paths.length) setTimeout(step, 0);
-    else onDone && onDone({ det, res, fan, fail, keys: vs.map(v => v.key), runs: paths.length, years: Array.from({ length: years }, (_, i) => I.startYear + i) });
+    return k < paths.length;
   }
-  step();
+  return chunked(next, () => onStep && onStep(k / paths.length),
+    () => onDone && onDone({ det, res, fan, fail, keys: vs.map(v => v.key), runs: paths.length, years: Array.from({ length: years }, (_, i) => I.startYear + i) }));
 }
 
 function pct(arr, q) {
@@ -174,10 +187,10 @@ function pct(arr, q) {
 
 // Break-even-Zins: Bis zu welchem Anschlusszins ist die Anschlussfinanzierung besser als die Ablösung aus dem ETF-Depot?
 function houseBreakEven(I, A, scenario) {
-  const J = JSON.parse(JSON.stringify(I));
+  const J = clone(I);
   J.loans.forEach(l => { l.after = 'etf'; });
   const netEtf = maxNet(J, A, scenario);
-  const f = z => { const K = JSON.parse(JSON.stringify(I)); K.loans.forEach(l => { l.after = 'anschluss'; l.zins = z; }); return maxNet(K, A, scenario, null, netEtf) - netEtf; };
+  const f = z => { const K = clone(I); K.loans.forEach(l => { l.after = 'anschluss'; l.zins = z; }); return maxNet(K, A, scenario, null, netEtf) - netEtf; };
   let lo = 0, hi = 0.15;
   if (f(lo) < 0) return { rate: null, netEtf };
   if (f(hi) > 0) return { rate: Infinity, netEtf };
