@@ -698,7 +698,6 @@ function renderP2() {
 }
 
 // Werte je Zeile für Haushalt oder eine Person
-const sum = a => a.reduce((x, y) => x + y, 0);
 const PERS_ARR = ['basis', 'prv', 'basisIn', 'prvIn', 'basisPay', 'prvPay', 'basisPayW', 'prvPayW', 'lump', 'avd', 'avdIn', 'grv', 'avdPay', 'grvW', 'avdPayW'];
 function V(r, k, who = chartPerson) {
   if (who >= 0) return r.pp[who][k];
