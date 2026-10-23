@@ -43,8 +43,8 @@ function pctNet(I, A, scenario, paths, q, guess) {
 // ─── Optimierer: Aufteilung des Budgets auf ETF-Depot, Altersvorsorgedepot, Basisrente und private RV ───
 // Koordinatensuche über Beiträge und Auszahlungsoptionen beider Personen. Der Rest des Budgets fließt ins ETF-Depot.
 const OPT_SPACE = {
-  avd: { eigen: [0, 360, 900, 1800], extra: [0, 1680, 3360, 5040], payStart: [65, 66, 67, 68, 69, 70], payEnd: [85, 88, 91, 95, 100], teilkapital: [0, 0.3] },
-  basis: { beitrag: [0, 1200, 2400, 4800, 9600, 19200], payStart: [62, 65, 67, 70] },
+  avd: { eigen: [0, AVD.g1Cap, AVD.fMax / 2, AVD.fMax], extra: [0, 1, 2, 3].map(k => k * (AVD.einMax - AVD.fMax) / 3), payStart: Array.from({ length: AVD.payMax - AVD.payMin + 1 }, (_, i) => AVD.payMin + i), payEnd: [AVD.planEndMin, 88, 91, 95, 100], teilkapital: [0, AVD.teilMax] },
+  basis: { beitrag: [0, 1200, 2400, 4800, 9600, 19200], payStart: [INS.basisMinAge, 65, 67, 70] },
   prv: { beitrag: [0, 1200, 2400, 4800, 9600], payStart: [62, 65, 67, 70], mode: ['rente', 'teil', 'kapital'] },
 };
 const OPT_AMOUNT = { avd: ['eigen', 'extra'], basis: ['beitrag'], prv: ['beitrag'] };

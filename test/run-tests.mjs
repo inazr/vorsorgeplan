@@ -304,5 +304,13 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('loadState({}) entspricht den Standardwerten', JSON.stringify(g('loadState({})')) === JSON.stringify({ I: g('DEFAULTS'), A: g('ASSUME') }));
 }
 
+// 22. OPT_SPACE aus AVD/INS abgeleitet, gleiche Werte wie das frühere Literal
+{
+  const alt = { avd: { eigen: [0, 360, 900, 1800], extra: [0, 1680, 3360, 5040], payStart: [65, 66, 67, 68, 69, 70], payEnd: [85, 88, 91, 95, 100], teilkapital: [0, 0.3] },
+    basis: { beitrag: [0, 1200, 2400, 4800, 9600, 19200], payStart: [62, 65, 67, 70] },
+    prv: { beitrag: [0, 1200, 2400, 4800, 9600], payStart: [62, 65, 67, 70], mode: ['rente', 'teil', 'kapital'] } };
+  check('OPT_SPACE entspricht dem alten Literal', g('JSON.stringify(OPT_SPACE)') === JSON.stringify(alt), g('JSON.stringify(OPT_SPACE)'));
+}
+
 console.log(`${ok} Prüfungen bestanden, ${fail} fehlgeschlagen`);
 process.exit(fail ? 1 : 0);

@@ -383,12 +383,12 @@ function avdCard(i) {
   return `<div class="card">
     <div class="card-h"><h2>Altersvorsorgedepot ${esc(P.name)}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${P.avd.on ? `<div class="fields">
-      ${F(b + '.eigen', 'Geförderter Eigenbeitrag', { t: 'eur', u: '€/Jahr', step: 60, min: 0, max: 1800, h: 'Maximal 1.800 €. Mindestens 120 € für Zulagen.' })}
-      ${F(b + '.extra', 'Zusätzlich ungefördert', { t: 'eur', u: '€/Jahr', step: 120, min: 0, max: 5040, h: 'Bis 6.840 € insgesamt. Später wird nur der Ertrag besteuert.' })}
+      ${F(b + '.eigen', 'Geförderter Eigenbeitrag', { t: 'eur', u: '€/Jahr', step: 60, min: 0, max: AVD.fMax, h: `Maximal ${eur(AVD.fMax)}. Mindestens ${eur(AVD.minEigen)} für Zulagen.` })}
+      ${F(b + '.extra', 'Zusätzlich ungefördert', { t: 'eur', u: '€/Jahr', step: 120, min: 0, max: AVD.einMax - AVD.fMax, h: `Bis ${eur(AVD.einMax)} insgesamt. Später wird nur der Ertrag besteuert.` })}
       ${F(b + '.cost', 'Kosten des Depots', { t: 'pct', step: 0.05, h: 'Fonds plus Depot. Standarddepot max. 1 %.' })}
-      ${S(b + '.teilkapital', 'Einmalauszahlung zu Beginn', [[0, 'Keine'], [0.1, '10 %'], [0.2, '20 %'], [0.3, '30 % (Maximum)']])}
-      ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(65, 70))}
-      ${S(b + '.payEnd', 'Auszahlungsplan bis Alter', yearOpts(85, 100))}
+      ${S(b + '.teilkapital', 'Einmalauszahlung zu Beginn', Array.from({ length: Math.round(AVD.teilMax * 10) + 1 }, (_, k) => [k / 10, k === 0 ? 'Keine' : pc(k / 10, 0) + (k / 10 === AVD.teilMax ? ' (Maximum)' : '')]))}
+      ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(AVD.payMin, AVD.payMax))}
+      ${S(b + '.payEnd', 'Auszahlungsplan bis Alter', yearOpts(AVD.planEndMin, 100))}
       ${S(b + '.refundTo', 'Steuererstattung § 10a fließt', REFUND_OPTS('avd'), { h: 'Steuerersparnis über der Zulage, kommt im Folgejahr' })}
     </div>
     <div class="facts" id="avdfacts-${i}"></div>` : '<p class="note">' + esc(P.name) + ' spart nicht ins Altersvorsorgedepot.</p>'}
@@ -415,11 +415,11 @@ function basisCard(i) {
     <div class="card-h"><h2>Basisrente ${esc(P.name)}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${c.on ? `<div class="fields three">
       ${F(b + '.beitrag', 'Beitrag', { t: 'eur', u: '€/Jahr', step: 300, min: 0 })}
-      ${S(b + '.payStart', 'Rente ab Alter', yearOpts(62, 70), { h: 'Frühestens mit 62' })}
+      ${S(b + '.payStart', 'Rente ab Alter', yearOpts(INS.basisMinAge, 70), { h: `Frühestens mit ${INS.basisMinAge}` })}
       ${S(b + '.refundTo', 'Steuererstattung fließt', REFUND_OPTS('basis'), { h: 'Kommt im Folgejahr' })}
     </div>
     ${costFields(b, c)}
-    <div class="facts" id="basisfacts-${i}"></div>` : `<p class="note">Beiträge sind bis zum Höchstbetrag (2026: 30.826 € je Person, abzüglich Arbeitnehmer- und Arbeitgeberbeitrag zur gesetzlichen Rente) als Sonderausgaben abziehbar. Die Rente ist wie die gesetzliche Rente zu versteuern, lebenslang, nicht vererbbar und nicht kapitalisierbar.</p>`}
+    <div class="facts" id="basisfacts-${i}"></div>` : `<p class="note">Beiträge sind bis zum Höchstbetrag (2026: ${eur(idxVal(INS.hb, 2026, 0))} je Person, abzüglich Arbeitnehmer- und Arbeitgeberbeitrag zur gesetzlichen Rente) als Sonderausgaben abziehbar. Die Rente ist wie die gesetzliche Rente zu versteuern, lebenslang, nicht vererbbar und nicht kapitalisierbar.</p>`}
   </div>`;
 }
 function prvCard(i) {
@@ -428,12 +428,12 @@ function prvCard(i) {
     <div class="card-h"><h2>Private Rentenversicherung ${esc(P.name)}</h2>${C(b + '.on', 'Nutzen', { rr: 1 })}</div>
     ${c.on ? `<div class="fields three">
       ${F(b + '.beitrag', 'Beitrag', { t: 'eur', u: '€/Jahr', step: 300, min: 0 })}
-      ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(60, 75), { h: 'Hälftelung erst ab 62 und nach 12 Jahren' })}
+      ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(60, 75), { h: `Hälftelung erst ab ${INS.halfAge} und nach ${INS.halfYears} Jahren` })}
       ${S(b + '.mode', 'Auszahlung als', [['rente', 'Lebenslange Rente'], ['kapital', 'Kapital (ins ETF-Depot)'], ['teil', 'Teilkapital + Rente']], { rr: 1 })}
       ${c.mode === 'teil' ? S(b + '.teil', 'Teilkapital', [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9].map(v => [v, pc(v, 0)])) : ''}
     </div>
     ${costFields(b, c)}
-    <div class="facts" id="prvfacts-${i}"></div>` : `<p class="note">Fondsgebundene Rentenversicherung ohne Förderung. In der Ansparphase fällt keine Steuer an. Die Rente ist nur mit dem Ertragsanteil steuerpflichtig (17 % bei Beginn mit 67). Bei Kapitalauszahlung zählen 85 % des Ertrags, ab 62 und nach 12 Jahren davon die Hälfte.</p>`}
+    <div class="facts" id="prvfacts-${i}"></div>` : `<p class="note">Fondsgebundene Rentenversicherung ohne Förderung. In der Ansparphase fällt keine Steuer an. Die Rente ist nur mit dem Ertragsanteil steuerpflichtig (${pc(ertragsanteil(SV.rentenAlter), 0)} bei Beginn mit ${SV.rentenAlter}). Bei Kapitalauszahlung zählen ${pc(1 - INS.fondsFrei, 0)} des Ertrags, ab ${INS.halfAge} und nach ${INS.halfYears} Jahren davon die Hälfte.</p>`}
   </div>`;
 }
 function fundsHtml() {
@@ -451,37 +451,40 @@ function fundsHtml() {
     </div></div>`).join('');
 }
 function legalTable() {
+  const n = nf0.format, t26 = LAW.tariff[2026], t27 = LAW.tariff[2027], t28 = LAW.tariff[2028], k26 = LAW.kinder[2026], hb = y => idxVal(INS.hb, y, 0);
+  const rw = SV.rw[2026].toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
+  const zulMax = AVD.g1 * AVD.g1Cap + AVD.g2 * (AVD.fMax - AVD.g1Cap);
   const rows = [
-    ['Einkommensteuer', 'Tarif 2026, Grundfreibetrag 12.348 €', 'G', '§ 32a EStG', 'https://www.gesetze-im-internet.de/estg/__32a.html'],
-    ['Einkommensteuer', 'Tarif 2027/2028, Grundfreibetrag 12.564 / 12.900 €', 'E', 'BT-Drs. 21/8235', 'https://dserver.bundestag.de/btd/21/082/2108235.pdf'],
+    ['Einkommensteuer', `Tarif 2026, Grundfreibetrag ${eur(t26.gfb)}`, 'G', '§ 32a EStG', 'https://www.gesetze-im-internet.de/estg/__32a.html'],
+    ['Einkommensteuer', `Tarif 2027/2028, Grundfreibetrag ${n(t27.gfb)} / ${eur(t28.gfb)}`, 'E', 'BT-Drs. 21/8235', 'https://dserver.bundestag.de/btd/21/082/2108235.pdf'],
     ['Einkommensteuer', 'ab 2029 mit Inflation fortgeschrieben (Schalter)', 'A', 'Annahme', ''],
-    ['Solidaritätszuschlag', 'Freigrenze 40.700 € (Splitting), Milderung 11,9 %', 'G', '§§ 3, 4 SolZG', 'https://www.gesetze-im-internet.de/solzg_1995/__3.html'],
-    ['Kinder', 'Kinderfreibetrag 9.756 €, Kindergeld 259 € (2026)', 'G', '§§ 32, 66 EStG', 'https://www.gesetze-im-internet.de/estg/__32.html'],
+    ['Solidaritätszuschlag', `Freigrenze ${eur(LAW.soli.freigrenzeSplit)} (Splitting), Milderung ${pc(LAW.soli.milderung)}`, 'G', '§§ 3, 4 SolZG', 'https://www.gesetze-im-internet.de/solzg_1995/__3.html'],
+    ['Kinder', `Kinderfreibetrag ${eur(k26.kfb)}, Kindergeld ${eur(k26.kg)} (2026)`, 'G', '§§ 32, 66 EStG', 'https://www.gesetze-im-internet.de/estg/__32.html'],
     ['Rentenbesteuerung', 'Besteuerungsanteil +0,5 Pp. je Jahrgang, 100 % ab 2058', 'G', '§ 22 Nr. 1 EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
-    ['Kapitalerträge', 'Abgeltungsteuer 26,375 %, Sparerpauschbetrag 2.000 €', 'G', '§§ 20, 32d EStG', 'https://www.gesetze-im-internet.de/estg/__32d.html'],
-    ['Investmentsteuer', 'Teilfreistellung 30 %, Vorabpauschale mit Basiszins 3,20 % (2026)', 'G', '§§ 18-20 InvStG', 'https://www.gesetze-im-internet.de/invstg_2018/__18.html'],
-    ['Altersvorsorgedepot', 'Grundzulage 50 % bis 360 €, 25 % bis 1.800 € (max. 540 €)', 'G', '§ 84 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
-    ['Altersvorsorgedepot', 'Kinderzulage bis 300 €, Mindesteigenbeitrag 120 €', 'G', '§§ 85, 86 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
-    ['Altersvorsorgedepot', 'Sonderausgabenabzug 1.800 € + Zulage mit Günstigerprüfung', 'G', '§ 10a EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
-    ['Altersvorsorgedepot', 'Selbständige förderberechtigt (unter 67)', 'G', '§ 10a Abs. 1 S. 5 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
-    ['Altersvorsorgedepot', 'Auszahlung ab 65 bis 70, Plan bis mind. 85, bis 30 % Einmalbetrag', 'G', '§ 1 AltZertG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
+    ['Kapitalerträge', `Abgeltungsteuer ${pc(LAW.abgSt * (1 + LAW.soliKap), 3)}, Sparerpauschbetrag ${eur(LAW.sparerPB)}`, 'G', '§§ 20, 32d EStG', 'https://www.gesetze-im-internet.de/estg/__32d.html'],
+    ['Investmentsteuer', `Teilfreistellung 30 %, Vorabpauschale mit Basiszins ${pc(LAW.basiszins[2026] / 100, 2)} (2026)`, 'G', '§§ 18-20 InvStG', 'https://www.gesetze-im-internet.de/invstg_2018/__18.html'],
+    ['Altersvorsorgedepot', `Grundzulage ${pc(AVD.g1, 0)} bis ${eur(AVD.g1Cap)}, ${pc(AVD.g2, 0)} bis ${eur(AVD.fMax)} (max. ${eur(zulMax)})`, 'G', '§ 84 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
+    ['Altersvorsorgedepot', `Kinderzulage bis ${eur(AVD.kindMax)}, Mindesteigenbeitrag ${eur(AVD.minEigen)}`, 'G', '§§ 85, 86 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
+    ['Altersvorsorgedepot', `Sonderausgabenabzug ${eur(AVD.fMax)} + Zulage mit Günstigerprüfung`, 'G', '§ 10a EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
+    ['Altersvorsorgedepot', `Selbständige förderberechtigt (unter ${SV.rentenAlter})`, 'G', '§ 10a Abs. 1 S. 5 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
+    ['Altersvorsorgedepot', `Auszahlung ab ${AVD.payMin} bis ${AVD.payMax}, Plan bis mind. ${AVD.planEndMin}, bis ${pc(AVD.teilMax, 0)} Einmalbetrag`, 'G', '§ 1 AltZertG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', 'Auszahlung voll steuerpflichtig, keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'G', '§§ 237, 229 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__237.html'],
-    ['Basisrente', 'Höchstbetrag 30.826 € je Person (2026), gemeinsam bei Zusammenveranlagung, minus AN- und AG-Beitrag zur GRV', 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
-    ['Basisrente', 'Höchstbetrag 2027: 32.308 € (knappschaftliche BBG 130.800 € laut Kabinettsbeschluss)', 'E', 'SV-Rechengrößenverordnung 2027', ''],
-    ['Basisrente', 'Rente frühestens ab 62, Besteuerung wie gesetzliche Rente', 'G', '§ 22 Nr. 1 S. 3 a aa EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
+    ['Basisrente', `Höchstbetrag ${eur(hb(2026))} je Person (2026), gemeinsam bei Zusammenveranlagung, minus AN- und AG-Beitrag zur GRV`, 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
+    ['Basisrente', `Höchstbetrag 2027: ${eur(hb(2027))} (knappschaftliche BBG 130.800 € laut Kabinettsbeschluss)`, 'E', 'SV-Rechengrößenverordnung 2027', ''],
+    ['Basisrente', `Rente frühestens ab ${INS.basisMinAge}, Besteuerung wie gesetzliche Rente`, 'G', '§ 22 Nr. 1 S. 3 a aa EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Basisrente, private RV', 'Kostenarten wie im Produktinformationsblatt', 'G', '§ 2a AltZertG, AltvPIBV', 'https://www.gesetze-im-internet.de/altzertg/__2a.html'],
-    ['Private Rentenversicherung', 'Rente mit Ertragsanteil (17 % bei Beginn mit 67)', 'G', '§ 22 Nr. 1 S. 3 a bb EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
-    ['Private Rentenversicherung', 'Kapital: 15 % des Ertrags steuerfrei (fondsgebunden), ab 62 und nach 12 Jahren die Hälfte mit persönlichem Steuersatz, sonst Abgeltungsteuer', 'G', '§ 20 Abs. 1 Nr. 6 EStG', 'https://www.gesetze-im-internet.de/estg/__20.html'],
+    ['Private Rentenversicherung', `Rente mit Ertragsanteil (${pc(ertragsanteil(SV.rentenAlter), 0)} bei Beginn mit ${SV.rentenAlter})`, 'G', '§ 22 Nr. 1 S. 3 a bb EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
+    ['Private Rentenversicherung', `Kapital: ${pc(INS.fondsFrei, 0)} des Ertrags steuerfrei (fondsgebunden), ab ${INS.halfAge} und nach ${INS.halfYears} Jahren die Hälfte mit persönlichem Steuersatz, sonst Abgeltungsteuer`, 'G', '§ 20 Abs. 1 Nr. 6 EStG', 'https://www.gesetze-im-internet.de/estg/__20.html'],
     ['Krankenversicherung', 'Basisrente und private RV in der KVdR beitragsfrei, freiwillig Versicherte zahlen auf die volle Rente', 'G', '§ 240 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__240.html'],
-    ['Krankenversicherung', 'Kapitalauszahlung bei freiwillig Versicherten: 1/120 über 10 Jahre', 'A', 'Annahme analog § 229 SGB V', ''],
-    ['Rentenversicherung', 'Rentenwert 42,52 € ab 1.7.2026, BBG 101.400 € / 106.200 €', 'G', 'SGB VI, RV-Rechengrößen', 'https://www.deutsche-rentenversicherung.de/'],
+    ['Krankenversicherung', `Kapitalauszahlung bei freiwillig Versicherten: 1/${INS.kvLumpMonths} über ${INS.kvLumpMonths / 12} Jahre`, 'A', 'Annahme analog § 229 SGB V', ''],
+    ['Rentenversicherung', `Rentenwert ${rw} ab 1.7.2026, BBG ${eur(SV.bbgRV[2026])} / ${eur(SV.bbgRV[2027])}`, 'G', 'SGB VI, RV-Rechengrößen', 'https://www.deutsche-rentenversicherung.de/'],
     ['Rentenversicherung', 'Haltelinie 48 % bis 2031, danach Dämpfung (Schalter)', 'G', 'Rentenpaket 2025', ''],
-    ['Rentenversicherung', 'Regelaltersgrenze 67, Abschlag 0,3 % je Monat', 'G', '§§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__77.html'],
-    ['Krankenversicherung', 'BBG 69.750 € (2026) / 76.500 € (2027), Zusatzbeitrag Ø 2,9 %', 'G', 'SGB V, BStabG', ''],
+    ['Rentenversicherung', `Regelaltersgrenze ${SV.rentenAlter}, Abschlag 0,3 % je Monat`, 'G', '§§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__77.html'],
+    ['Krankenversicherung', `BBG ${eur(SV.bbgKV[2026])} (2026) / ${eur(SV.bbgKV[2027])} (2027), Zusatzbeitrag Ø ${pc(ASSUME.zusatz)}`, 'G', 'SGB V, BStabG', ''],
     ['Krankenversicherung', 'KVdR über 9/10-Regel, freiwillige GKV zählt, 3 Jahre je Kind', 'G', '§ 5 Abs. 1 Nr. 11 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__5.html'],
-    ['Krankenversicherung', 'Freiwillige Rentner: 14,0 % + Zusatzbeitrag auf Kapitalerträge, ohne Sparerpauschbetrag', 'G', '§ 240 SGB V, Beitragsverfahrensgrundsätze', ''],
-    ['Pflegeversicherung', '3,6 %, Rentner zahlen voll', 'G', '§ 55 SGB XI', ''],
+    ['Krankenversicherung', `Freiwillige Rentner: ${pc(SV.kvErm)} + Zusatzbeitrag auf Kapitalerträge, ohne Sparerpauschbetrag`, 'G', '§ 240 SGB V, Beitragsverfahrensgrundsätze', ''],
+    ['Pflegeversicherung', `${pc(SV.pv)}, Rentner zahlen voll`, 'G', '§ 55 SGB XI', ''],
   ];
   const chip = s => s === 'G' ? '<span class="pill good">gilt</span>' : s === 'B' ? '<span class="pill info">beschlossen</span>' : s === 'E' ? '<span class="pill warn">Entwurf</span>' : '<span class="pill info">Annahme</span>';
   return `<div class="tablebox"><table class="legal"><thead><tr><th>Bereich</th><th>Wert im Rechner</th><th>Status</th><th>Grundlage</th></tr></thead><tbody>${rows.map(r => `<tr><td class="txt">${r[0]}</td><td class="txt">${r[1]}</td><td class="txt">${chip(r[2])}</td><td class="txt">${r[4] ? `<a href="${r[4]}" target="_blank" rel="noopener">${r[3]}</a>` : r[3]}</td></tr>`).join('')}</tbody></table></div>`;
