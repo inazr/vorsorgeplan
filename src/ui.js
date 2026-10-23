@@ -48,17 +48,31 @@ let OPT = null, OPT_RUN = null;
 // Ergebnisse: A = nur ETF-Depot, B = deine Aufteilung, O = Optimum
 const SCN = { A: 'Nur ETF-Depot', B: 'Deine Aufteilung', O: 'Optimum' };
 const SCN_C = { A: '--sA', B: '--s2', O: '--s1' };
-const PROD = { avd: { name: 'Altersvorsorgedepot', short: 'AVD' }, basis: { name: 'Basisrente', short: 'Basisrente' }, prv: { name: 'Private Rentenversicherung', short: 'private RV' } };
+// Vorsorgeprodukte: Namen (inl im Satz, chart in Legenden, tbl Spalten der Jahrestabelle), feste Chartfarbe, Optimierer-Stellschrauben
+const PROD = {
+  avd: { name: 'Altersvorsorgedepot', short: 'AVD', inl: 'Altersvorsorgedepot', chart: 'Altersvorsorgedepot', color: '--s2',
+    tbl: { in: 'AVD-Beitrag', pay: 'AVD-Auszahlung', cap: 'AVD' },
+    lab: { on: 'Genutzt', eigen: 'Geförderter Eigenbeitrag', extra: 'Ungeförderter Zusatzbeitrag', payStart: 'Auszahlung ab', payEnd: 'Plan bis', teilkapital: 'Einmalauszahlung' } },
+  basis: { name: 'Basisrente', short: 'Basisrente', inl: 'Basisrente', chart: 'Basisrente', color: '--s7',
+    tbl: { in: 'Basis-Beitrag', refund: 'Erstattung Basis', pay: 'Basisrente', cap: 'Basisrente' },
+    lab: { on: 'Genutzt', beitrag: 'Beitrag', payStart: 'Rente ab' } },
+  prv: { name: 'Private Rentenversicherung', short: 'private RV', inl: 'private Rentenversicherung', chart: 'Private RV', color: '--s4',
+    tbl: { in: 'PRV-Beitrag', pay: 'PRV-Rente', lump: 'PRV-Kapital', cap: 'Priv. RV' },
+    lab: { on: 'Genutzt', beitrag: 'Beitrag', payStart: 'Auszahlung ab', mode: 'Auszahlung als' } },
+};
+const PK = Object.keys(PROD);
+// Stapelreihenfolgen der Charts, mit validate_palette geprüft (auch wenn einzelne Produkte fehlen)
+const ORDER_WEALTH = ['prv', 'etf', 'avd', 'basis'], ORDER_SAVE = ['prv', 'etf', 'basis', 'avd'], ORDER_INCOME = ['prv', 'grv', 'avd', 'etf', 'basis'];
 const fact = (l, v) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`;
 const FUND_C = ['--s1', '--s2', '--s3', '--s4', '--s5'];
 const dv = (r, v) => chartReal ? v / r.priceIdx : v;
 const realLabel = () => chartReal ? 'in heutiger Kaufkraft' : 'nominal';
 const commit = () => { save(); renderPanels(); scheduleRecalc(); };
 // Fingerabdruck ohne Produkt-Einstellungen: ändert er sich, ist das Optimum veraltet
-function optSig() { const I = clone(ST.I); I.persons.forEach(p => { delete p.avd; delete p.basis; delete p.prv; }); return JSON.stringify([I, ST.A, ST.A.optMode, ST.A.optQ]); }
+function optSig() { const I = clone(ST.I); I.persons.forEach(p => PK.forEach(k => delete p[k])); return JSON.stringify([I, ST.A, ST.A.optMode, ST.A.optQ]); }
 const simOf = k => R && R['sim' + k];
 const prodUsed = (p, k) => p[k]?.on && (k === 'avd' ? p.avd.eigen + p.avd.extra > 0 : p[k].beitrag > 0);
-const prodList = I => Object.keys(PROD).filter(k => I.persons.some(p => prodUsed(p, k)));
+const prodList = I => PK.filter(k => I.persons.some(p => prodUsed(p, k)));
 function readInput(el) {
   const t = el.dataset.t;
   if (t === 'bool') return el.checked;
@@ -141,7 +155,7 @@ function renderKPIs() {
 }
 // Kurzbeschreibung einer Produkt-Aufteilung
 function optLabel(patch) {
-  const parts = Object.keys(PROD).filter(k => patch.some(p => prodUsed(p, k))).map(k => PROD[k].short);
+  const parts = PK.filter(k => patch.some(p => prodUsed(p, k))).map(k => PROD[k].short);
   return parts.length ? parts.join(' · ') : 'nur ETF';
 }
 function kpi(l, v, d, sw, b) { return `<div class="kpi${b ? ' b' : ''}"><div class="l">${sw ? `<span class="sw" style="background:var(--${sw})"></span>` : ''}${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`; }
@@ -342,11 +356,11 @@ function renderFacts() {
       ['Effektivkosten', eff ? pc(eff.eff, 2).replace(' %', ' Pp.') : '–'],
       ['Kosten bis Rentenbeginn', keur(st.cost)],
     ];
-    if (k === 'basis') items.push(['Steuererstattung gesamt', keur(tot('basisRefund'))], ['Steuerpflichtiger Anteil', pc(LAW.besteuerungsanteil(y0), 0)]);
-    else {
-      if (teil > 0) items.push(['Steuer auf Kapital', keur(tot('lumpTax'))], ['Hälftelung', st.half ? 'ja' : '<span class="pill warn">nein</span>']);
-      if (teil < 1) items.push(['Ertragsanteil der Rente', pc(ertragsanteil(cfg.payStart), 0)]);
-    }
+    const d = POLICY_DEF[k];
+    if (d.deduct) items.push(['Steuererstattung gesamt', keur(tot(k + 'Refund'))]);
+    if (d.rentTax === 'kohorte') items.push(['Steuerpflichtiger Anteil', pc(LAW.besteuerungsanteil(y0), 0)]);
+    if (d.lump && teil > 0) items.push(['Steuer auf Kapital', keur(tot('lumpTax'))], ['Hälftelung', st.half ? 'ja' : '<span class="pill warn">nein</span>']);
+    if (d.rentTax === 'ertragsanteil' && teil < 1) items.push(['Ertragsanteil der Rente', pc(ertragsanteil(cfg.payStart), 0)]);
     el.innerHTML = items.map(([l, v]) => fact(l, v)).join('');
   }));
   // Budgetübersicht im ersten Rechenjahr
@@ -356,9 +370,7 @@ function renderFacts() {
     const n = I.persons.length;
     const per = (who, key) => who < 0 ? sum(I.persons.map((p, i) => r.pp[i][key] || 0)) : r.pp[who][key] || 0;
     const lines = [
-      ['Altersvorsorgedepot (Eigenbeitrag)', w => per(w, 'avdIn')],
-      ['Basisrente', w => per(w, 'basisIn')],
-      ['Private Rentenversicherung', w => per(w, 'prvIn')],
+      ...PK.map(k => [PROD[k].name + (k === 'avd' ? ' (Eigenbeitrag)' : ''), w => per(w, k + 'In')]),
       ['ETF-Depot (Rest)', w => w < 0 ? r.etfContrib : r.etfContrib / n],
       ['Kreditraten', w => w < 0 ? r.loanPay : r.loanPay / n],
     ];
@@ -608,11 +620,6 @@ function autoSplit() {
   const span = end - I.startYear + 1, n = D.funds.length;
   D.funds.forEach((f, k) => { f.from = I.startYear + Math.round(span * k / n); f.to = k === n - 1 ? end : I.startYear + Math.round(span * (k + 1) / n) - 1; });
 }
-const OPT_LAB = {
-  avd: { on: 'Genutzt', eigen: 'Geförderter Eigenbeitrag', extra: 'Ungeförderter Zusatzbeitrag', payStart: 'Auszahlung ab', payEnd: 'Plan bis', teilkapital: 'Einmalauszahlung' },
-  basis: { on: 'Genutzt', beitrag: 'Beitrag', payStart: 'Rente ab' },
-  prv: { on: 'Genutzt', beitrag: 'Beitrag', payStart: 'Auszahlung ab', mode: 'Auszahlung als' },
-};
 function optFmt(k, v) {
   if (k === 'on') return v ? 'ja' : 'nein';
   if (['eigen', 'extra', 'beitrag'].includes(k)) return eur(v) + '/Jahr';
@@ -636,14 +643,14 @@ function renderOptResult() {
   const el = $('#opt-out'); if (!el || !OPT || !R) return;
   const P = ST.I.persons, stale = OPT.sig !== optSig();
   const rows = [];
-  P.forEach((p, i) => Object.keys(OPT_LAB).forEach(k => {
+  P.forEach((p, i) => PK.forEach(k => {
     const cur = p[k], opt = OPT.patch[i][k];
     const uC = prodUsed(p, k), uO = prodUsed({ [k]: opt }, k);
     // Beiträge zeigen, wenn eines von beiden das Produkt nutzt, Auszahlungsoptionen nur für das genutzte Optimum
-    const keys = Object.keys(OPT_LAB[k]).filter(f => f === 'on' || (uC || uO) && (OPT_AMOUNT[k].includes(f) || uO));
+    const keys = Object.keys(PROD[k].lab).filter(f => f === 'on' || (uC || uO) && (OPT_AMOUNT[k].includes(f) || uO));
     keys.forEach(f => {
       const o = f === 'on' ? prodUsed(p, k) : cur[f], v = f === 'on' ? prodUsed({ [k]: opt }, k) : opt[f];
-      rows.push(`<tr><td>${esc(p.name)}</td><td class="txt">${PROD[k].name}</td><td class="txt">${OPT_LAB[k][f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
+      rows.push(`<tr><td>${esc(p.name)}</td><td class="txt">${PROD[k].name}</td><td class="txt">${PROD[k].lab[f]}</td><td>${optFmt(f, o)}</td><td>${o !== v ? `<b>${optFmt(f, v)}</b>` : optFmt(f, v)}</td></tr>`);
     });
   }));
   const d = (R.netO ?? 0) - (R.netB ?? 0);
@@ -698,7 +705,7 @@ function renderP2() {
 }
 
 // Werte je Zeile für Haushalt oder eine Person
-const PERS_ARR = ['basis', 'prv', 'basisIn', 'prvIn', 'basisPay', 'prvPay', 'basisPayW', 'prvPayW', 'lump', 'avd', 'avdIn', 'grv', 'avdPay', 'grvW', 'avdPayW'];
+const PERS_ARR = ['grv', 'grvW', 'lump', ...PK.flatMap(k => [k, k + 'In', k + 'Pay', k + 'PayW'])];
 function V(r, k, who = chartPerson) {
   if (who >= 0) return r.pp[who][k];
   if (PERS_ARR.includes(k)) return sum(r[k]);
@@ -745,20 +752,16 @@ function renderWho(sim) {
   const save = sim.rows.filter(x => x.saveMonths > 0);
   const tot = (k, who) => sum(save.map(x => V(x, k, who)));
   const has = k => sim.rows.some(x => V(x, k, -1) > 0 || V(x, k + 'Pay', -1) > 0);
-  const cols = [...P.map((p, i) => i), -1];
+  const cols = [...P.map((p, i) => i), -1], pk = PK.filter(has);
   const lines = [
     ['Nettovermögen bei Entnahmestart', who => keur(dv(rb, V(rb, 'netWorth', who))), true],
     ['davon ETF-Depot', who => keur(dv(rb, V(rb, 'etf', who)))],
-    ...(has('avd') ? [['davon Altersvorsorgedepot', who => keur(dv(rb, V(rb, 'avd', who)))]] : []),
-    ...(has('basis') ? [['davon Basisrente', who => keur(dv(rb, V(rb, 'basis', who)))]] : []),
-    ...(has('prv') ? [['davon private Rentenversicherung', who => keur(dv(rb, V(rb, 'prv', who)))]] : []),
-    ...(has('avd') ? [['Eigene Beiträge Altersvorsorgedepot', who => keur(tot('avdIn', who))], ['Zulagen', who => keur(tot('zul', who))], ['Steuererstattung § 10a', who => keur(tot('refund', who))]] : []),
-    ...(has('basis') ? [['Beiträge Basisrente', who => keur(tot('basisIn', who))], ['Steuererstattung Basisrente', who => keur(tot('basisRefund', who))]] : []),
-    ...(has('prv') ? [['Beiträge private Rentenversicherung', who => keur(tot('prvIn', who))]] : []),
+    ...pk.map(k => ['davon ' + PROD[k].inl, who => keur(dv(rb, V(rb, k, who)))]),
+    ...pk.flatMap(k => k === 'avd'
+      ? [['Eigene Beiträge Altersvorsorgedepot', who => keur(tot('avdIn', who))], ['Zulagen', who => keur(tot('zul', who))], ['Steuererstattung § 10a', who => keur(tot('refund', who))]]
+      : [['Beiträge ' + PROD[k].inl, who => keur(tot(k + 'In', who))], ...(POLICY_DEF[k].deduct ? [['Steuererstattung ' + PROD[k].name, who => keur(tot(k + 'Refund', who))]] : [])]),
     ['Gesetzliche Rente', who => m(V(r, 'grv', who)), true],
-    ...(has('avd') ? [['Altersvorsorgedepot', who => m(V(r, 'avdPay', who))]] : []),
-    ...(has('basis') ? [['Basisrente', who => m(V(r, 'basisPay', who))]] : []),
-    ...(has('prv') ? [['Private Rentenversicherung', who => m(V(r, 'prvPay', who))]] : []),
+    ...pk.map(k => [PROD[k].name, who => m(V(r, k + 'Pay', who))]),
     ['ETF-Verkauf', who => m(V(r, 'etfSale', who))],
     ['Einkommensteuer + Soli', who => '−' + m(V(r, 'est', who))],
     ['Kapitalertragsteuer', who => '−' + m(V(r, 'kapTax', who))],
@@ -772,15 +775,15 @@ function renderCharts() {
   if (!R) return;
   if (chartScen === 'O' && !R.simO) chartScen = 'B';
   const sim = simOf(chartScen), others = ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k));
-  const C1 = cssv('--s1'), C2 = cssv('--s2'), C3 = cssv('--s3'), C4 = cssv('--s4'), C5 = cssv('--s5'), C6 = cssv('--s6'), C7 = cssv('--s7'), C8 = cssv('--s8'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
+  const C1 = cssv('--s1'), C3 = cssv('--s3'), C5 = cssv('--s5'), C6 = cssv('--s6'), C8 = cssv('--s8'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
   const years = sim.rows.map(r => r.year);
   // Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
   const area = (name, data, color, stack) => ({ name, type: 'line', stack, symbol: 'none', data, lineStyle: { width: 1, color }, itemStyle: { color }, areaStyle: { color, opacity: 0.25 } });
   const total = (name, data, extra = {}) => ({ name, type: 'line', symbol: 'none', data, lineStyle: { width: 2, color: ink }, itemStyle: { color: ink }, ...extra });
   const wLine = ws => ({ markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } });
-  // Feste Produktfarben in allen Charts: gesetzliche Rente C1, Altersvorsorgedepot C2, ETF C3, Basisrente C7, private RV C4.
-  // Reihenfolgen mit validate_palette geprüft, auch wenn einzelne Produkte fehlen.
-  const PC = { grv: C1, avd: C2, etf: C3, basis: C7, prv: C4 };
+  // Feste Farben in allen Charts: gesetzliche Rente C1, ETF C3, Produkte aus PROD (AVD C2, Basisrente C7, private RV C4).
+  // Reihenfolgen stehen in ORDER_WEALTH, ORDER_SAVE und ORDER_INCOME.
+  const PC = { grv: C1, etf: C3, ...Object.fromEntries(PK.map(k => [k, cssv(PROD[k].color)])) };
   const on = k => sim.rows.some(r => V(r, k) > 0);   // Serie nur zeigen, wenn das Produkt genutzt wird
   const scC = k => cssv(SCN_C[k]);
   const bar = (name, data, color, stack = 's') => ({ name, type: 'bar', stack, data, itemStyle: { color, borderColor: surf, borderWidth: 1, borderRadius: 0 }, barMaxWidth: 18, emphasis: { focus: 'series' } });
@@ -793,10 +796,8 @@ function renderCharts() {
   chartOf('ch-wealth').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: years },
     series: [
-      ...(on('prv') ? [area('Private RV', sim.rows.map(r => dv(r, V(r, 'prv'))), PC.prv, 'w')] : []),
-      area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), PC.etf, 'w'),
-      ...(on('avd') ? [area('Altersvorsorgedepot', sim.rows.map(r => dv(r, V(r, 'avd'))), PC.avd, 'w')] : []),
-      ...(on('basis') ? [area('Basisrente', sim.rows.map(r => dv(r, V(r, 'basis'))), PC.basis, 'w')] : []),
+      ...ORDER_WEALTH.flatMap(k => k === 'etf' ? [area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), PC.etf, 'w')]
+        : on(k) ? [area(PROD[k].chart, sim.rows.map(r => dv(r, V(r, k))), PC[k], 'w')] : []),
       ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), C8, 'd')] : []),
       total('Nettovermögen', sim.rows.map(r => dv(r, V(r, 'netWorth'))), wLine(ws)),
       ...others.map(k => ({ name: 'Nettovermögen ' + SCN[k], type: 'line', symbol: 'none', data: simOf(k).rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: scC(k) }, itemStyle: { color: scC(k) } })),
@@ -826,11 +827,11 @@ function renderCharts() {
     const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
     $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${realLabel()}`;
     let cum = 0;
-    const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => a + r.pp[i].avdIn + r.pp[i].zul + r.pp[i].basisIn + r.pp[i].prvIn, 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
+    const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => PK.reduce((b, k) => b + r.pp[i][k + 'In'] + (k === 'avd' ? r.pp[i].zul : 0), a), 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
     chartOf('ch-avd').setOption(baseOpt({
       xAxis: { ...baseOpt().xAxis, data: avdSim.rows.map(r => r.year) },
       series: [
-        ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, r.avd[i] + r.basis[i] + r.prv[i])), PPC[i], 'a')),
+        ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, PK.reduce((b, k) => b + r[k][i], 0))), PPC[i], 'a')),
         { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(avdSim.wStartYear) },
       ],
     }), true);
@@ -846,10 +847,8 @@ function renderCharts() {
       ...(on('loanPay') ? [bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), C6)] : []),
       ...(on('loanSonder') ? [bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), CA)] : []),
       bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), C8),
-      ...(on('prvIn') ? [bar('Private RV', sr.map(r => dv(r, V(r, 'prvIn'))), PC.prv)] : []),
-      bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), PC.etf),
-      ...(on('basisIn') ? [bar('Basisrente', sr.map(r => dv(r, V(r, 'basisIn'))), PC.basis)] : []),
-      ...(on('avdIn') ? [bar('Altersvorsorgedepot', sr.map(r => dv(r, V(r, 'avdIn'))), PC.avd), bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), C1)] : []),
+      ...ORDER_SAVE.flatMap(k => k === 'etf' ? [bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), PC.etf)]
+        : on(k + 'In') ? [bar(PROD[k].chart, sr.map(r => dv(r, V(r, k + 'In'))), PC[k]), ...(k === 'avd' ? [bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), C1)] : [])] : []),
     ],
   })), true);
 
@@ -862,11 +861,9 @@ function renderCharts() {
     xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => { const b = ps.filter(p => p.seriesType === 'bar'); return tip(ps[0].axisValue, [...tipSeries(b), tipSum(b), ...tipSeries(ps.filter(p => p.seriesType !== 'bar'))]); } },
     series: [
-      ...(on('prvPayW') ? [bar('Private RV', er.map(r => m(r, V(r, 'prvPayW'))), PC.prv)] : []),
-      bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), PC.grv),
-      ...(on('avdPayW') ? [bar('Altersvorsorgedepot', er.map(r => m(r, V(r, 'avdPayW'))), PC.avd)] : []),
-      bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf),
-      ...(on('basisPayW') ? [bar('Basisrente', er.map(r => m(r, V(r, 'basisPayW'))), PC.basis)] : []),
+      ...ORDER_INCOME.flatMap(k => k === 'grv' ? [bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), PC.grv)]
+        : k === 'etf' ? [bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf)]
+        : on(k + 'PayW') ? [bar(PROD[k].chart, er.map(r => m(r, V(r, k + 'PayW'))), PC[k])] : []),
       { name: 'Netto', type: 'line', symbol: 'circle', symbolSize: 4, data: er.map(r => m(r, V(r, 'net'))), lineStyle: { width: 2, color: ink }, itemStyle: { color: ink } },
     ],
   })), true);
@@ -897,11 +894,13 @@ function renderTable(sim) {
   const e = (r, k) => eur(dv(r, V(r, k)));
   const cols = [
     ['Jahr', r => r.year], ['Phase', r => r.phase], ['Alter', r => chartPerson >= 0 ? r.ages[chartPerson] : r.ages.join(' / ')],
-    ['ETF-Sparrate', r => e(r, 'etfContrib')], ['AVD-Beitrag', r => e(r, 'avdIn')], ['Zulagen', r => e(r, 'zul')], ['Erstattung', r => e(r, 'refund')],
-    ['Basis-Beitrag', r => e(r, 'basisIn')], ['Erstattung Basis', r => e(r, 'basisRefund')], ['PRV-Beitrag', r => e(r, 'prvIn')],
-    ['Rente', r => e(r, 'grv')], ['AVD-Auszahlung', r => e(r, 'avdPay')], ['Basisrente', r => e(r, 'basisPay')], ['PRV-Rente', r => e(r, 'prvPay')], ['PRV-Kapital', r => e(r, 'lump')], ['ETF-Verkauf', r => e(r, 'etfSale')],
+    ['ETF-Sparrate', r => e(r, 'etfContrib')],
+    ...PK.flatMap(k => [[PROD[k].tbl.in, r => e(r, k + 'In')], ...(k === 'avd' ? [['Zulagen', r => e(r, 'zul')], ['Erstattung', r => e(r, 'refund')]]
+      : POLICY_DEF[k].deduct ? [[PROD[k].tbl.refund, r => e(r, k + 'Refund')]] : [])]),
+    ['Rente', r => e(r, 'grv')], ...PK.map(k => [PROD[k].tbl.pay, r => e(r, k + 'Pay')]),
+    ...POLICIES.filter(k => POLICY_DEF[k].lump).map(k => [PROD[k].tbl.lump, r => e(r, 'lump')]), ['ETF-Verkauf', r => e(r, 'etfSale')],
     ['ESt + Soli', r => e(r, 'est')], ['Kapitalertragst.', r => e(r, 'kapTax')], ['KV/PV Rente', r => e(r, 'kv')],
-    ['Netto/Monat', r => r.net ? eur(dv(r, V(r, 'net')) / r.wMonths) : '–'], ['ETF-Depot', r => e(r, 'etf')], ['AVD', r => e(r, 'avd')], ['Basisrente', r => e(r, 'basis')], ['Priv. RV', r => e(r, 'prv')],
+    ['Netto/Monat', r => r.net ? eur(dv(r, V(r, 'net')) / r.wMonths) : '–'], ['ETF-Depot', r => e(r, 'etf')], ...PK.map(k => [PROD[k].tbl.cap, r => e(r, k)]),
     ['Kredit/Jahr', r => e(r, 'loanPay')], ['Restschuld', r => e(r, 'debt')], ['Nettovermögen', r => e(r, 'netWorth')],
   ];
   $('#tbl').innerHTML = `<table><thead><tr>${cols.map(c => `<th>${c[0]}</th>`).join('')}</tr></thead><tbody>${sim.rows.map(r => `<tr class="ph-${r.phase}">${cols.map(c => `<td>${c[1](r)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
