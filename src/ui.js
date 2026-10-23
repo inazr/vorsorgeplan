@@ -5,8 +5,6 @@ let ST = { I: clone(DEFAULTS), A: clone(ASSUME) };
 try { const s = localStorage.getItem(STORE_KEY); if (s) ST = loadState(JSON.parse(s)); } catch (e) { }
 // Optionale Migration gespeicherter Eingaben (nur in der privaten Version definiert)
 if (typeof MIGRATE === 'function') { try { MIGRATE(ST); } catch (e) { } }
-ST.I.loans = ST.I.loans || [];
-(ST.I.children || []).forEach(c => { if (c.zulageTo == null) { const k = ST.I.persons.findIndex(p => p.avd?.kinderzulage); c.zulageTo = k >= 0 ? k : 1; } });
 const save = () => { try { localStorage.setItem(STORE_KEY, JSON.stringify(ST)); } catch (e) { } };
 
 const $ = (s, r = document) => r.querySelector(s);
@@ -81,7 +79,6 @@ function scheduleRecalc() { clearTimeout(recalcT); recalcT = setTimeout(recalc, 
 
 function recalc() {
   const { I, A } = ST;
-  const t0 = performance.now();
   const out = {};
   if (OPT) out.IO = applyPatch(I, OPT.patch);
   if (I.withdraw.strategy !== 'fixedNet') {
@@ -92,7 +89,6 @@ function recalc() {
   out.simA = simulate(I, A, { scenario: 'A', targetReal: out.netA || 0, detail: true });
   out.simB = simulate(I, A, { scenario: 'B', targetReal: out.netB || 0, detail: true });
   if (OPT) out.simO = simulate(out.IO, A, { scenario: 'B', targetReal: out.netO || 0, detail: true });
-  out.ms = performance.now() - t0;
   R = out;
   renderKPIs(); renderFacts();
   const ob = $('#seg-scen button[data-v="O"]');
@@ -313,7 +309,7 @@ function renderFacts() {
     const a = P.avd;
     const cF = Math.min(a.eigen, AVD.fMax);
     const nowY = Math.max(ST.I.startYear, 2027);
-    const zk = I.children.filter(c => (c.zulageTo ?? 1) === i && nowY - c.by <= c.kgUntil).length;
+    const zk = I.children.filter(c => c.zulageTo === i && nowY - c.by <= c.kgUntil).length;
     const zul = zulageGrund(cF, AVD) + (zk > 0 && cF >= AVD.minEigen ? Math.min(cF, AVD.kindMax * zk) : 0);
     const startRow = R.simB.rows.find(r => r.avdPay[i] > 0);
     const before = startRow ? R.simB.rows.find(r => r.year === startRow.year - 1) : null;
@@ -748,7 +744,7 @@ function renderWho(sim) {
   const has = k => sim.rows.some(x => V(x, k, -1) > 0 || V(x, k + 'Pay', -1) > 0);
   const cols = [...P.map((p, i) => i), -1];
   const lines = [
-    ['Nettovermögen bei Entnahmestart', who => keur(dv(rb, V(rb, 'netWorth', who))), 'sub'],
+    ['Nettovermögen bei Entnahmestart', who => keur(dv(rb, V(rb, 'netWorth', who))), true],
     ['davon ETF-Depot', who => keur(dv(rb, V(rb, 'etf', who))), ''],
     ...(has('avd') ? [['davon Altersvorsorgedepot', who => keur(dv(rb, V(rb, 'avd', who))), '']] : []),
     ...(has('basis') ? [['davon Basisrente', who => keur(dv(rb, V(rb, 'basis', who))), '']] : []),
@@ -756,7 +752,7 @@ function renderWho(sim) {
     ...(has('avd') ? [['Eigene Beiträge Altersvorsorgedepot', who => keur(tot('avdIn', who)), 'n'], ['Zulagen', who => keur(tot('zul', who)), 'n'], ['Steuererstattung § 10a', who => keur(tot('refund', who)), 'n']] : []),
     ...(has('basis') ? [['Beiträge Basisrente', who => keur(tot('basisIn', who)), 'n'], ['Steuererstattung Basisrente', who => keur(tot('basisRefund', who)), 'n']] : []),
     ...(has('prv') ? [['Beiträge private Rentenversicherung', who => keur(tot('prvIn', who)), 'n']] : []),
-    ['Gesetzliche Rente', who => m(V(r, 'grv', who)), 'sub'],
+    ['Gesetzliche Rente', who => m(V(r, 'grv', who)), true],
     ...(has('avd') ? [['Altersvorsorgedepot', who => m(V(r, 'avdPay', who)), '']] : []),
     ...(has('basis') ? [['Basisrente', who => m(V(r, 'basisPay', who)), '']] : []),
     ...(has('prv') ? [['Private Rentenversicherung', who => m(V(r, 'prvPay', who)), '']] : []),
@@ -764,10 +760,10 @@ function renderWho(sim) {
     ['Einkommensteuer + Soli', who => '−' + m(V(r, 'est', who)), ''],
     ['Kapitalertragsteuer', who => '−' + m(V(r, 'kapTax', who)), ''],
     ['Kranken- und Pflegeversicherung', who => '−' + m(V(r, 'kv', who)), ''],
-    ['Netto pro Monat', who => '<b>' + m(V(r, 'net', who)) + '</b>', 'sub'],
+    ['Netto pro Monat', who => '<b>' + m(V(r, 'net', who)) + '</b>', true],
   ];
   $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal`;
-  $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(P[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, cls]) => `<tr${cls === 'sub' ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+  $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(P[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, sub]) => `<tr${sub ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 function renderCharts() {
   if (!R) return;
@@ -913,7 +909,7 @@ function renderTable(sim) {
 function runMC() {
   const b = $('#btn-mc'); b.disabled = true; MC = null;
   const variants = [{ key: 'A', I: ST.I, scenario: 'A' }, { key: 'B', I: ST.I, scenario: 'B' }, ...(OPT ? [{ key: 'O', I: applyPatch(ST.I, OPT.patch), scenario: 'B' }] : [])];
-  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns || 200, seed: 7, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
+  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns, seed: 7, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
 }
 function renderMC() {
   const r = MC, qs = [0.1, 0.25, 0.5, 0.75, 0.9];
@@ -983,7 +979,6 @@ $('#btn-reset').onclick = () => {
 };
 
 // Start
-if (ST.A.mcRuns == null) ST.A.mcRuns = 200;
 renderPanels();
 recalc();
 try { const t = +localStorage.getItem(STORE_KEY + '-tab'); if (t > 0) $$('.tab')[t].click(); } catch (e) { }

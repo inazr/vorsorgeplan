@@ -274,7 +274,7 @@ function simulate(I, A, opt) {
       if (a.m <= 0) return;
       a.zul = zulageGrund(a.cF, AVD);
       // Kinderzulage: 100 % der Beiträge, max. 300 € je zugeordnetem Kind mit Kindergeld
-      const zk = kgKids.filter(c => (c.zulageTo ?? 1) === i).length;
+      const zk = kgKids.filter(c => c.zulageTo === i).length;
       if (zk > 0 && a.cF >= AVD.minEigen) a.zul += Math.min(a.cF, AVD.kindMax * zk);
     });
     // Erstattungen des Vorjahres als Zuzahlung: AVD ungefördert bis zum Höchstbeitrag, Basisrente bis zum Rentenbeginn. Rest ins ETF-Depot.

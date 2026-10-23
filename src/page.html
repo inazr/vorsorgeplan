@@ -7,7 +7,7 @@
   --bg: #f6f7f8; --surface: #ffffff; --surface-2: #eef1f3; --line: #d9dee3; --line-2: #c3cad1;
   --ink: #12181f; --ink-2: #4a5561; --ink-3: #6f7b87;
   --accent: #1f5f8b; --accent-ink: #ffffff; --accent-soft: #e2edf5;
-  --good: #1a7f4b; --good-soft: #e3f3ea; --warn: #9a6700; --warn-soft: #fbf0d6; --bad: #b42318; --bad-soft: #fbe5e3;
+  --good: #1a7f4b; --good-soft: #e3f3ea; --warn: #9a6700; --warn-soft: #fbf0d6;
   --s1: #2a78d6; --s2: #eb6834; --s3: #1baf7a; --s4: #eda100; --s5: #e87ba4; --s7: #6250d6; --sA: #6f7b87;
   --s6: #008300; --s8: #e34948;
   --font-ui: "Public Sans", "Segoe UI", system-ui, sans-serif;
@@ -18,7 +18,7 @@
   --bg: #111417; --surface: #181c20; --surface-2: #20262b; --line: #2c343b; --line-2: #3a444d;
   --ink: #e9edf0; --ink-2: #b3bdc6; --ink-3: #8a96a1;
   --accent: #6eb2e4; --accent-ink: #0d1a24; --accent-soft: #1a2c3a;
-  --good: #4cc38a; --good-soft: #15291f; --warn: #e0b04a; --warn-soft: #2d2412; --bad: #f07a6e; --bad-soft: #321a18;
+  --good: #4cc38a; --good-soft: #15291f; --warn: #e0b04a; --warn-soft: #2d2412;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s7: #9085e9; --sA: #8a96a1;
   --s6: #008300; --s8: #e66767;
   color-scheme: dark; } }
@@ -26,7 +26,7 @@
   --bg: #111417; --surface: #181c20; --surface-2: #20262b; --line: #2c343b; --line-2: #3a444d;
   --ink: #e9edf0; --ink-2: #b3bdc6; --ink-3: #8a96a1;
   --accent: #6eb2e4; --accent-ink: #0d1a24; --accent-soft: #1a2c3a;
-  --good: #4cc38a; --good-soft: #15291f; --warn: #e0b04a; --warn-soft: #2d2412; --bad: #f07a6e; --bad-soft: #321a18;
+  --good: #4cc38a; --good-soft: #15291f; --warn: #e0b04a; --warn-soft: #2d2412;
   --s1: #3987e5; --s2: #d95926; --s3: #199e70; --s4: #c98500; --s5: #d55181; --s7: #9085e9; --sA: #8a96a1;
   --s6: #008300; --s8: #e66767;
   color-scheme: dark; }
@@ -73,8 +73,7 @@ button { font: inherit; }
 main.wrap { padding-block: 20px 60px; display: block; }
 .panel { display: flex; flex-direction: column; gap: 16px; }
 .grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); }
-.grid-3 { display: grid; gap: 16px; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-@media (max-width: 860px) { .grid, .grid-3 { grid-template-columns: minmax(0, 1fr); } }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr); } }
 .card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 16px; display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .card-h { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; }
 .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px 12px; }
@@ -103,7 +102,6 @@ main.wrap { padding-block: 20px 60px; display: block; }
 .pill { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 999px; white-space: nowrap; }
 .pill.good { background: var(--good-soft); color: var(--good); }
 .pill.warn { background: var(--warn-soft); color: var(--warn); }
-.pill.bad { background: var(--bad-soft); color: var(--bad); }
 .infotip { position: relative; display: inline-grid; place-items: center; width: 16px; height: 16px; margin-left: 6px; border: 1px solid var(--line-2); border-radius: 50%; font-size: 11px; font-weight: 600; font-style: normal; color: var(--ink-2); cursor: help; vertical-align: 2px; }
 .infotip .tip { display: none; position: absolute; top: 22px; left: -8px; z-index: 20; width: min(320px, 80vw); padding: 8px 10px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface); color: var(--ink-2); box-shadow: 0 4px 16px rgb(0 0 0 / .12); font-size: 12px; font-weight: 400; line-height: 1.45; text-transform: none; letter-spacing: 0; }
 .infotip:hover .tip, .infotip:focus .tip { display: block; }
@@ -133,8 +131,6 @@ details > summary { cursor: pointer; font-weight: 600; padding: 4px 0; }
 .muted { color: var(--ink-3); }
 .row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .spacer { flex: 1; }
-.hl { color: var(--good); font-weight: 600; }
-.neg { color: var(--bad); }
 textarea { width: 100%; min-height: 120px; font-family: var(--font-num); font-size: 12px; border: 1px solid var(--line-2); border-radius: 6px; background: var(--surface); color: var(--ink); padding: 8px; }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
 </style>
