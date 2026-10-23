@@ -2,6 +2,7 @@
 // JAHRESSIMULATION: eine Engine für Einzelrechnung, Optimierer und Monte Carlo
 // ═══════════════════════════════════════════════════════════════
 const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohnentwicklung
+  kgAbzug: 0.04,                             // Abschlag bei Anspruch auf Krankengeld, § 10 Abs. 1 Nr. 3 S. 4 EStG
   bbgRV: { 2026: 101400, 2027: 106200 },
   bbgKV: { 2026: 69750, 2027: 76500 },       // 2027 inkl. Sonderanhebung BStabG
   de: { 2026: 51944, 2027: 53452 },          // Durchschnittsentgelt (vorläufig)
@@ -112,6 +113,19 @@ function kvdrCheck(P, nKidsAll = P.kidsForKvdr ?? 0) {
   return { ok: have >= need, auto: true, need, have: Math.min(half, have), half };
 }
 
+// Annahme: Anteil der Auszahlungen vor Entnahmestart (Steuer und SV), der nicht reinvestiert wird
+const REINVEST_ABZUG = 0.3;
+// Steuerpflichtiger Rentenanteil: im Startjahr gross · Besteuerungsanteil, danach wird der Freibetrag (im ersten vollen Jahr) festgeschrieben; st = { fb: null }
+function taxablePension(gross, startYear, year, st) {
+  const ba = LAW.besteuerungsanteil(startYear);
+  if (year === startYear) return gross * ba;
+  if (st.fb == null) st.fb = gross * (1 - ba);
+  return Math.max(0, gross - st.fb);
+}
+// Steuerpflichtiges Erwerbseinkommen einer Person (Arbeitnehmer: abzüglich Arbeitnehmerpauschbetrag); floor0: Arbeitnehmeranteil nicht unter 0
+// (zvEBase ja; taxBase nein, dort wird erst die Summe mit den Renten bei 0 gekappt, sonst verschöbe sich die Aufteilung der ESt bei Einkommen unter dem Pauschbetrag)
+function earnedTaxable(p, w, L, floor0) { if (p.job !== 'employee') return w.g; const x = w.g - (w.m > 0 ? L.anPausch : 0); return floor0 ? Math.max(0, x) : x; }
+
 // ═══════════════════════════════════════════════════════════════
 // simulate(I, A, opt)
 //   opt.scenario: 'A' (nur ETF) | 'B' (eingeschaltete Vorsorgeprodukte, Rest ETF)
@@ -137,7 +151,7 @@ function simulate(I, A, opt) {
   const avd = persons.map(() => makeAVD());
   const kv = persons.map(p => kvdrCheck(p, I.children.length));
   const ep = persons.map(p => p.epNow);
-  const renteFB = persons.map(() => null);   // Rentenfreibetrag (fix ab Folgejahr)
+  const renteFB = persons.map(() => ({ fb: null }));   // Rentenfreibetrag (fix ab Folgejahr)
   const renteStartY = persons.map(p => Math.floor(retireStartAbs(p) / 12));
   // Versicherungen (Basisrente, private RV): Vertrag ab Rechnungsbeginn, Beiträge bis Sparende, eigenem Rentenbeginn oder Rentenbeginn des Vertrags
   const pol = persons.map(p => Object.fromEntries(POLICIES.map(k => {
@@ -200,9 +214,7 @@ function simulate(I, A, opt) {
     const grvTaxable = grv.map((g, i) => {
       if (g <= 0) return 0;
       const ba = LAW.besteuerungsanteil(renteStartY[i]);
-      if (year === renteStartY[i]) return g * ba;
-      if (renteFB[i] == null) renteFB[i] = g * (1 - ba);   // erstes volles Jahr fixiert Freibetrag
-      return Math.max(0, g - renteFB[i]);
+      return taxablePension(g, renteStartY[i], year, renteFB[i]);
     });
 
     // ── Vorsorgeaufwendungen Erwerbsphase ──
@@ -212,10 +224,10 @@ function simulate(I, A, opt) {
       const bbgKV = L.bbgKV * w.m / 12, bbgRV = L.bbgRV * w.m / 12;
       if (p.job === 'employee') {
         if (p.rvPflicht) vorsorge += SV.rvAN * Math.min(w.g, bbgRV);
-        vorsorge += ((SV.kvGen + L.zus) / 2 * (p.krankengeld ? 0.96 : 1) + L.pv / 2 + pvZu) * Math.min(w.g, bbgKV);
+        vorsorge += ((SV.kvGen + L.zus) / 2 * (p.krankengeld ? 1 - SV.kgAbzug : 1) + L.pv / 2 + pvZu) * Math.min(w.g, bbgKV);
       } else {
         const rate = p.krankengeld ? SV.kvGen : SV.kvErm;
-        vorsorge += ((rate + L.zus) * (p.krankengeld ? 0.96 : 1) + L.pv + pvZu) * Math.min(w.g, bbgKV);
+        vorsorge += ((rate + L.zus) * (p.krankengeld ? 1 - SV.kgAbzug : 1) + L.pv + pvZu) * Math.min(w.g, bbgKV);
       }
     });
 
@@ -307,7 +319,7 @@ function simulate(I, A, opt) {
     const basisDed = Math.min(basisPaid, Math.max(0, persons.length * idxVal(INS.hb, year, A.wageGrowth) - grvBeitr));
 
     // ── Steuer Erwerbsphase / Grundlage zvE ohne Kapital ──
-    const zvEBase = persons.reduce((s, p, i) => s + (p.job === 'employee' ? Math.max(0, work[i].g - (work[i].m > 0 ? L.anPausch : 0)) : work[i].g), 0);
+    const zvEBase = persons.reduce((s, p, i) => s + earnedTaxable(p, work[i], L, true), 0);
 
     // §10a Günstigerprüfung
     let refund = 0;
@@ -343,9 +355,7 @@ function simulate(I, A, opt) {
       const gross = policyRent(q.s, q.cfg, year, m);
       let taxable = 0;
       if (gross > 0 && k === 'basis') {
-        const y0 = Math.floor(q.s0 / 12), ba = LAW.besteuerungsanteil(y0);
-        if (year === y0) taxable = gross * ba;
-        else { if (q.fb == null) q.fb = gross * (1 - ba); taxable = Math.max(0, gross - q.fb); }
+        taxable = taxablePension(gross, Math.floor(q.s0 / 12), year, q);
       } else if (gross > 0) taxable = gross * ertragsanteil(q.cfg.payStart);
       const W = m > 0 ? gross * monthsIn(year, Math.max(q.s0, wStartAbs), endAbs) / m : 0;
       return [k, { gross, taxable, W }];
@@ -485,7 +495,7 @@ function simulate(I, A, opt) {
     const taxFromBudget = Math.min(taxOutside, Math.max(0, sparBudget - avdOut + refundEtf));
     const savePart = Math.max(0, sparBudget - avdOut - taxOutside + refundEtf);
     // Auszahlungen aus Vorsorgeprodukten vor Entnahmestart werden reinvestiert (grobe Steuer/SV-Annahme 30 %), Kapitalauszahlungen netto
-    const avdReinvest = (sum(avdPay.map(a => a.gross)) - sum(avdW) + sum(polGross) - sum(polW)) * (1 - 0.3) + lumpNet;
+    const avdReinvest = (sum(avdPay.map(a => a.gross)) - sum(avdW) + sum(polGross) - sum(polW)) * (1 - REINVEST_ABZUG) + lumpNet;
     const etfContrib = savePart + extraInvest + avdReinvest;
     // Erstattungen je Person verteilen und fürs Folgejahr vormerken
     const dedPer = avdIn.map(a => a.cF + a.zul);
@@ -523,7 +533,7 @@ function simulate(I, A, opt) {
     // Einkommensteuer (Splitting) nach Anteil am steuerpflichtigen Einkommen ohne Kapital.
     // Steuererstattung aus § 10a nach Anteil am Sonderausgabenabzug.
     const np = persons.length;
-    const taxBase = persons.map((p, i) => Math.max(0, (p.job === 'employee' ? work[i].g - (work[i].m > 0 ? L.anPausch : 0) : work[i].g) + grvTaxable[i] + avdPay[i].taxable + polTaxable[i]));
+    const taxBase = persons.map((p, i) => Math.max(0, earnedTaxable(p, work[i], L) + grvTaxable[i] + avdPay[i].taxable + polTaxable[i]));
     const taxBaseSum = taxBase.reduce((a, b) => a + b, 0);
     const pp = persons.map((p, i) => {
       const estShare = taxBaseSum > 0 ? (ev.it.est + ev.it.soli) * taxBase[i] / taxBaseSum : (ev.it.est + ev.it.soli) / np;
