@@ -126,5 +126,166 @@ const o = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS)); const J = 
   const K = applyPatch(I, optPatch(optFinish(J))); return { b: K.persons[1].basis.on && K.persons[1].basis.beitrag, p: K.persons[0].prv.on, inc: K.persons[0].income === I.persons[0].income }; })()`);
 check('Optimum-Patch', o.b === 4800 && o.p === false && o.inc, JSON.stringify(o));
 
+// ─── Tests für bisher ungetestete Pfade (halten das heutige Verhalten fest) ───
+// Engine-Funktionen und Konstanten für Tests in Node (Funktionen/Konstanten des vm-Kontexts)
+const E = g('({ simulate, maxNet, monthsIn, retireStartAbs, monthsRetired, avdPayStartAbs, depotYear, depotSell, makeDepot, kapTax, lawYear, makeLoans, loanMonth, loanPreview, annuityM, loanRateM, absM, tariffFor, idxVal, rwFor, SV, AVD, LAW, mk })');
+const sumA = a => a.reduce((x, y) => x + y, 0);
+
+// 12. Entnahmestrategien: ewige Rente, festes Netto, Erschöpfung
+{
+  const { I, A } = E.mk((I, A) => { I.withdraw.strategy = 'perpetual'; });
+  const nP = E.maxNet(I, A, 'B'), nR = mn(null);
+  const s = E.simulate(I, A, { scenario: 'B', targetReal: nP });
+  check('perpetual: Kapital bleibt erhalten', s.finalReal >= s.startReal - 1, `${s.finalReal} / ${s.startReal}`);
+  check('perpetual: Netto unter realConst', nP < nR, `${nP} / ${nR}`);
+  const f1 = E.mk((I, A) => { I.withdraw.strategy = 'fixedNet'; I.withdraw.fixedNet = 2500; });
+  const s1 = E.simulate(f1.I, f1.A, { scenario: 'B', targetReal: 0, detail: true });
+  const ent = s1.rows.filter(r => r.phase === 'Entnahme' && !r.shortfall);
+  check('fixedNet 2500: Netto = Wunsch · Monate · Preisindex', ent.length > 25 && ent.every(r => near(r.net, 2500 * r.wMonths * r.priceIdx, 1)), ent.length);
+  check('fixedNet 2500: nicht erschöpft', !s1.depleted);
+  const f2 = E.mk((I, A) => { I.withdraw.strategy = 'fixedNet'; I.withdraw.fixedNet = 20000; });
+  const s2 = E.simulate(f2.I, f2.A, { scenario: 'B', targetReal: 0, detail: true });
+  check('fixedNet 20000: erschöpft im Entnahmezeitraum', s2.depleted === true && s2.depletedYear >= s2.wStartYear && s2.depletedYear <= s2.endYear, `${s2.depletedYear} / ${s2.wStartYear}-${s2.endYear}`);
+}
+
+// 13. Erstattungen aus § 10a (AVD): refundTo same / etf / none bei gleichem Zielnetto
+{
+  const run = m => { const { I, A } = E.mk((I, A) => I.persons.forEach(p => { p.avd.refundTo = m; })); return { I, s: E.simulate(I, A, { scenario: 'B', targetReal: 6000, detail: true }) }; };
+  const same = run('same'), etf = run('etf'), none = run('none');
+  // Zuzahlung ungefördert höchstens bis zum Höchstbeitrag (einMax) anteilig der Beitragsmonate
+  const P = same.I.persons, saveEnd = Math.min(...P.map(E.retireStartAbs));
+  let maxOver = -Infinity, more = false;
+  same.s.rows.forEach((r, k) => P.forEach((p, i) => {
+    const m = E.monthsIn(r.year, 2027 * 12, Math.min(saveEnd, E.retireStartAbs(p), E.avdPayStartAbs(p)));
+    maxOver = Math.max(maxOver, r.avdIn[i] - E.AVD.einMax * m / 12);
+    if (r.avdIn[i] > etf.s.rows[k].avdIn[i] + 1) more = true;
+  }));
+  check('refundTo same: avdIn höchstens einMax', maxOver <= 0.01, maxOver);
+  check('refundTo same: Zuzahlung erhöht avdIn gegenüber etf', more);
+  check('refundTo etf: höhere ETF-Sparrate im Folgejahr', etf.s.rows[1].etfContrib > same.s.rows[1].etfContrib, `${etf.s.rows[1].etfContrib} / ${same.s.rows[1].etfContrib}`);
+  check('refundTo none: Endvermögen unter same', none.s.finalReal < same.s.finalReal, `${none.s.finalReal} / ${same.s.finalReal}`);
+  check('sumRefunds in allen Fällen ähnlich (±1 %)', [etf, none].every(x => near(x.s.sumRefunds, same.s.sumRefunds, same.s.sumRefunds * 0.01)), `${same.s.sumRefunds} / ${etf.s.sumRefunds} / ${none.s.sumRefunds}`);
+}
+
+// 14. Monatsgenauigkeit
+{
+  check('monthsIn: Rente ab April ⇒ 9 Monate', E.monthsIn(2030, 2030 * 12 + 3, Infinity) === 9);
+  check('retireStartAbs: Monat nach dem Geburtstag', E.retireStartAbs({ by: 1997, retireAge: 67, bm: 3 }) === 2064 * 12 + 3);
+  const { I, A } = E.mk((I, A) => { I.saveUntil = 'last'; I.persons[1].retireAge = 64; });
+  const s = E.simulate(I, A, { scenario: 'B', targetReal: 5000, detail: true });
+  check('saveUntil last: Jahr mit Spar- und Entnahmemonaten', s.rows.some(r => r.saveMonths > 0 && r.wMonths > 0));
+  // grvW = grv · Anteil der Rentenmonate, die in die Entnahme fallen (Rentenbeginne Person 1: April, Person 2: Oktober)
+  const d = E.mk(); const wS = Math.max(...d.I.persons.map(E.retireStartAbs)), endAbs = (d.I.persons[0].by + d.I.withdraw.targetAge) * 12 + d.I.persons[0].bm;
+  const sd = E.simulate(d.I, d.A, { scenario: 'B', targetReal: 5000, detail: true });
+  let dev = 0, frac = false;
+  for (const r of sd.rows) d.I.persons.forEach((p, i) => {
+    if (r.grv[i] <= 0) return;
+    const sh = E.monthsIn(r.year, Math.max(E.retireStartAbs(p), wS), endAbs) / E.monthsRetired(p, r.year);
+    dev = Math.max(dev, Math.abs(r.grvW[i] - r.grv[i] * sh)); if (sh > 0 && sh < 1) frac = true;
+  });
+  check('grvW = grv · Anteil der Entnahmemonate', dev < 1e-6 && frac, `${dev} / ${frac}`);
+  const ns = []; for (let bm = 1; bm <= 12; bm++) ns.push(mn(`(I, A) => I.persons.forEach(p => { p.bm = ${bm}; })`));
+  const jump = Math.max(...ns.slice(1).map((x, k) => Math.abs(x / ns[k] - 1)));
+  check('Geburtsmonat 1…12: keine Sprünge über 3 %', jump <= 0.03, `${jump} / ${ns.map(Math.round)}`);
+}
+
+// 15. Depot: Vorabpauschale, Zwölftelung, FIFO-Verkauf
+{
+  const fund = o => ({ name: 'F', type: 'acc', tf: 0.3, ter: 0, divY: 0, from: 2027, to: 2099, ...o });
+  const dep = (o, val = 1000) => E.makeDepot({ funds: [fund(o)], startValue: val, startCost: val, startYear: 2027 });
+  const OPT = { buyT: 0.5, vpFracNew: 0.5 };
+  let d = dep({}), o = E.depotYear(d, 2027, 0.10, 0, 0.03, OPT);   // Basisertrag 100·3 %·0,7 = 2,10 je Anteil, Wertzuwachs 10 ⇒ voll
+  check('Vorabpauschale: Basisertrag', near(o.vp, 21, 1e-9) && near(d.funds[0].lots[0].vp, 21, 1e-9) && near(o.vpTaxable, 21 * 0.7, 1e-9), JSON.stringify(o));
+  d = dep({}); o = E.depotYear(d, 2027, 0.01, 0, 0.03, OPT);   // Wertzuwachs 1 deckelt
+  check('Vorabpauschale: durch Wertzuwachs gedeckelt', near(o.vp, 10, 1e-9), o.vp);
+  d = dep({}); o = E.depotYear(d, 2027, -0.10, 0, 0.03, OPT);
+  check('Vorabpauschale: bei Kursverlust null', o.vp === 0);
+  d = dep({ type: 'dist', divY: 0.02 }); o = E.depotYear(d, 2027, 0.10, 0, 0.03, OPT);   // min(2,1; 10) − Ausschüttung 2 = 0,1 je Anteil
+  check('Vorabpauschale: abzüglich Ausschüttung', near(o.vp, 1, 1e-9) && near(o.dist, 20, 1e-9), `${o.vp} / ${o.dist}`);
+  d = dep({}); o = E.depotYear(d, 2027, 0.10, 1000, 0.03, OPT);   // neue Tranche zum mittleren Kurs, Vorabpauschale nur zu vpFracNew
+  const nl = d.funds[0].lots[1], u = 1000 / (100 * Math.pow(1.1, 0.5));
+  check('Zwölftelung der Vorabpauschale bei neuer Tranche', near(nl.units, u, 1e-9) && near(nl.vp, 2.1 * u * 0.5, 1e-9) && near(d.funds[0].lots[0].vp, 21, 1e-9), JSON.stringify(nl));
+  // FIFO: älteste Tranche (Kosten 50) zuerst ganz, dann die Hälfte der zweiten (Kosten 90 + vp 10)
+  const mkLots = () => { const x = dep({}, 0); x.funds[0].lots.push({ y: 2020, units: 1, cost: 50, vp: 0 }, { y: 2021, units: 1, cost: 90, vp: 10 }); return x; };
+  d = mkLots(); const dry = E.depotSell(d, 150, 'newestFirst', true);
+  check('depotSell FIFO: Gewinn und Teilfreistellung', near(dry.gain, 50, 1e-9) && near(dry.taxable, 35, 1e-9) && near(dry.sold, 150, 1e-9), JSON.stringify(dry));
+  check('depotSell dry ändert den Bestand nicht', d.funds[0].lots.length === 2 && d.funds[0].lots[0].units === 1);
+  E.depotSell(d, 150, 'newestFirst', false);
+  check('depotSell: Bestand nach Verkauf', d.funds[0].lots.length === 1 && near(d.funds[0].lots[0].units, 0.5, 1e-9) && near(d.funds[0].lots[0].cost, 45, 1e-9) && near(d.funds[0].lots[0].vp, 5, 1e-9));
+}
+
+// 16. kapTax: Verlustvortrag, Sparerpauschbetrag, Günstigerprüfung
+{
+  const A0 = g('ASSUME'), L = E.lawYear(2030, A0, 1);
+  const lv = E.kapTax(500, 2000, L, 50000, 0, A0);
+  check('kapTax: Verlustvortrag größer als Ertrag', near(lv.newLoss, 1500, 1e-9) && lv.tax === 0, JSON.stringify(lv));
+  const ng = { ...A0, guenstiger: false };
+  const pb1 = E.kapTax(5000, 0, L, 1e6, 0, ng, 1000), pb2 = E.kapTax(5000, 0, L, 1e6, 0, ng, 99999);
+  check('kapTax: pb 1.000 zieht nur 1.000 ab', near(pb1.afterSPB, 4000, 1e-9) && near(pb1.tax, 4000 * 0.25 * 1.055, 1e-9), JSON.stringify(pb1));
+  check('kapTax: pb nie über Sparerpauschbetrag', near(pb2.afterSPB, 5000 - E.LAW.sparerPB, 1e-9), pb2.afterSPB);
+  const lo = E.kapTax(5000, 0, L, 10000, 0, A0), hi = E.kapTax(5000, 0, L, 200000, 0, A0);
+  check('kapTax: Günstigerprüfung bei kleinem zvE', lo.guenstiger === true && lo.tax < 3000 * 0.25 * 1.055, JSON.stringify(lo));
+  check('kapTax: keine Günstigerprüfung bei hohem zvE', hi.guenstiger === false && near(hi.tax, 3000 * 0.25 * 1.055, 1e-9), JSON.stringify(hi));
+}
+
+// 17. Darlehen: tilgungsfreie Zeit, Bankrestschuld, Teilablösung, Vorschau
+{
+  const base = { name: 'T', amount: 300000, eff: 0.035, startY: 2026, startM: 1, monthly: 1350, freeMonths: 0, fixBalBank: 0, fixEndY: 2036, fixEndM: 1, sonder: 0, sonderFrom: 2026, sonderTo: 2035, after: 'anschluss', zins: 0.04, years: 20, teil: 0 };
+  const free = { ...base, freeMonths: 12 }, l = E.makeLoans([free], 2026 * 12)[0];
+  let pay = 0, ints = 0; for (let m = 0; m < 12; m++) { const o = E.loanMonth(l, 2026 * 12 + m, false); pay += o.pay; ints += o.interest; }
+  check('Darlehen freeMonths: im ersten Jahr nur Zinsen', near(pay, ints, 1e-6) && near(l.bal, 300000, 1e-6), `${pay} / ${ints} / ${l.bal}`);
+  E.loanMonth(l, 2027 * 12, false);
+  check('Darlehen freeMonths: danach Tilgung', l.bal < 300000);
+  const lb = E.makeLoans([{ ...base, fixBalBank: 200000 }], 2026 * 12)[0];
+  for (let a = 2026 * 12; a <= 2036 * 12; a++) E.loanMonth(lb, a, true);
+  check('Darlehen fixBalBank: Restschuld zum Ende der Zinsbindung', near(lb.fixBal, 200000, 1e-6), lb.fixBal);
+  const pt = E.loanPreview({ ...base, after: 'teil', teil: 50000 }, 2026 * 12);
+  check('Darlehen after teil: Ablösung = teil', pt.payoff === 50000, pt.payoff);
+  const fixAbs = E.absM(2036, 1);
+  check('loanPreview: Ende nach Zinsbindung (Anschluss)', pt.end > fixAbs && E.loanPreview(base, 2026 * 12).end > fixAbs);
+  check('loanPreview: Ablösung bei after etf beendet das Darlehen zum Zinsbindungsende', E.loanPreview({ ...base, after: 'etf' }, 2026 * 12).end === fixAbs);
+}
+
+// 18. Fortschreibung von Tarif, Beitragsbemessungsgrenzen und Rentenwert
+{
+  const ix = { useDraft: true, indexTariff: true, inflation: 0.02 };
+  check('tariffFor 2035: Index ab 2028', near(E.tariffFor(2035, ix).idx, Math.pow(1.02, 7), 1e-12) && E.tariffFor(2035, ix).p === E.LAW.tariff[2028]);
+  check('tariffFor 2027 ohne Entwurf: Tarif 2026', E.tariffFor(2027, { ...ix, useDraft: false }).p === E.LAW.tariff[2026]);
+  check('tariffFor ohne Indexierung: Faktor 1', E.tariffFor(2035, { ...ix, indexTariff: false }).idx === 1);
+  check('idxVal bbgRV 2030', near(E.idxVal(E.SV.bbgRV, 2030, 0.03), 106200 * Math.pow(1.03, 3), 1e-6));
+  const A0 = g('ASSUME'), r = y => E.rwFor(y, A0) / E.rwFor(y - 1, A0);
+  check('rwFor: ab 2032 gedämpftes Wachstum', near(r(2031), 1 + A0.wageGrowth, 1e-12) && near(r(2032), 1 + A0.wageGrowth - A0.rentenDaempfung, 1e-12) && r(2032) < r(2031));
+}
+
+// 19. KV der Rentner: KVdR ohne Beiträge auf AVD-Auszahlungen, freiwillig mit
+{
+  const kvs = (kvdr, scen, patch) => { const { I, A } = E.mk((I, A) => { I.persons.forEach(p => { p.kvdr = kvdr; }); if (patch) patch(A); }); return E.simulate(I, A, { scenario: scen, targetReal: 5000, detail: true }).rows; };
+  const ja = kvs('ja', 'B'), jaA = kvs('ja', 'A'), nein = kvs('nein', 'B');
+  const ent = ja.map((r, k) => k).filter(k => ja[k].phase === 'Entnahme');
+  check('KVdR: KV in A und B gleich (AVD ohne Beitrag)', ent.length > 25 && ent.every(k => ja[k].pp.every((p, i) => near(p.kv, jaA[k].pp[i].kv, 0.01))));
+  const k0 = ja.findIndex(r => r.avdPay[0] > 0);
+  check('Freiwillig: KV mit AVD-Auszahlung höher als KVdR', k0 >= 0 && nein[k0].pp[0].kv > ja[k0].pp[0].kv + 1, `${nein[k0]?.pp[0].kv} / ${ja[k0]?.pp[0].kv}`);
+  const risk = kvs('ja', 'B', A => { A.kvAvdKvdr = true; });
+  check('Risikoschalter kvAvdKvdr: KVdR zahlt auf AVD', risk[k0].pp[0].kv > ja[k0].pp[0].kv + 1, `${risk[k0].pp[0].kv} / ${ja[k0].pp[0].kv}`);
+}
+
+// 20. Zufallspfade und Monte Carlo (asynchron, eigener Kontext mit setTimeout und Date)
+{
+  const ctx2 = vm.createContext({ console, Math, JSON, setTimeout, Date });
+  for (const f of ENGINE_FILES) vm.runInContext(readFileSync(join(root, 'src', f + '.js'), 'utf8'), ctx2);
+  const g2 = code => vm.runInContext(code, ctx2);
+  vm.runInContext(`function mk(f) { const I = JSON.parse(JSON.stringify(DEFAULTS)), A = JSON.parse(JSON.stringify(ASSUME)); if (f) f(I, A); return { I, A }; }`, ctx2);
+  const E2 = g2('({ rng, pct, makePaths, monteCarlo, ASSUME, mk })');
+  const seq = s => { const r = E2.rng(s); return [r(), r(), r(), r()]; };
+  check('rng: gleicher Startwert, gleiche Folge', JSON.stringify(seq(1)) === JSON.stringify(seq(1)) && JSON.stringify(seq(1)) !== JSON.stringify(seq(2)));
+  check('pct: Median von 1…4', E2.pct([1, 2, 3, 4], 0.5) === 2.5 && E2.pct([4, 1, 3, 2], 0) === 1 && E2.pct([1, 2, 3, 4], 1) === 4);
+  const p1 = E2.makePaths(3, 10, E2.ASSUME, 7), p2 = E2.makePaths(3, 10, E2.ASSUME, 7);
+  check('makePaths: deterministisch', p1.length === 3 && p1[0].length === 10 && JSON.stringify(p1) === JSON.stringify(p2) && JSON.stringify(p1) !== JSON.stringify(E2.makePaths(3, 10, E2.ASSUME, 8)));
+  const { I, A } = E2.mk();
+  const res = await new Promise(resolve => E2.monteCarlo(I, A, { runs: 3, seed: 1 }, null, resolve));
+  check('monteCarlo: Ergebnis je Pfad und Variante', res.runs === 3 && res.res.A.length === 3 && res.res.B.length === 3 && res.fan.A.length === 3 && res.keys.join() === 'A,B', JSON.stringify(res.keys));
+  check('monteCarlo: Jahre und Fehlerzähler', res.years[0] === I.startYear && res.fan.A[0].length === res.years.length && res.fail.A >= 0 && res.det.B > res.det.A);
+}
+
 console.log(`${ok} Prüfungen bestanden, ${fail} fehlgeschlagen`);
 process.exit(fail ? 1 : 0);
