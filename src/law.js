@@ -19,7 +19,7 @@ const LAW = {
   kinder: { // Summe beider Eltern inkl. BEA, Kindergeld je Monat
     2026: { kfb: 9756, kg: 259, st: 'G' }, 2027: { kfb: 10056, kg: 267, st: 'E' }, 2028: { kfb: 10236, kg: 272, st: 'E' },
   },
-  pausch: { anPausch: { 2026: 1230, 2027: 1430 }, rentnerWK: 102, sonderausg: 72 },
+  pausch: { anPausch: { 2026: 1230, 2027: { v: 1430, st: 'E' } }, rentnerWK: 102, sonderausg: 72 },
   abgSt: 0.25, soliKap: 0.055, sparerPB: 2000,
   basiszins: { 2023: 2.55, 2024: 2.29, 2025: 2.53, 2026: 3.20 },
   // Besteuerungsanteil Renten nach Wachstumschancengesetz
@@ -28,12 +28,20 @@ const LAW = {
   },
 };
 
+// Jahresweise Tabelle auflösen: letzter Eintrag mit Jahr <= year, davor der erste. Einträge sind Zahlen (gelten als 'G') oder Objekte mit st;
+// Entwürfe ('E') zählen nur mit useDraft. v ist bei { v, st } der innere Wert, sonst der ganze Eintrag.
+function lawPick(table, year, useDraft = true) {
+  const e = y => table[y], st = x => (x !== null && typeof x === 'object' && x.st) || 'G';
+  const ys = Object.keys(table).map(Number).filter(y => useDraft || st(e(y)) !== 'E').sort((a, b) => a - b);
+  let y0 = ys[0];
+  for (const y of ys) if (y <= year) y0 = y;
+  const x = e(y0);
+  return { y: y0, v: x !== null && typeof x === 'object' && Object.prototype.hasOwnProperty.call(x, 'v') ? x.v : x };
+}
+
 // Liefert den Tarif für ein Jahr. Nach dem letzten bekannten Jahr wird skaliert (Indexierung) oder eingefroren.
 function tariffFor(year, opts) {
-  const years = Object.keys(LAW.tariff).map(Number).filter(y => opts.useDraft || LAW.tariff[y].st !== 'E').sort((a, b) => a - b);
-  let base = years[0];
-  for (const y of years) if (y <= year) base = y;
-  const p = LAW.tariff[base];
+  const { y: base, v: p } = lawPick(LAW.tariff, year, opts.useDraft);
   const idx = (year > base && opts.indexTariff) ? Math.pow(1 + opts.inflation, year - base) : 1;
   return { p, idx };
 }

@@ -128,7 +128,7 @@ check('Optimum-Patch', o.b === 4800 && o.p === false && o.inc, JSON.stringify(o)
 
 // ─── Tests für bisher ungetestete Pfade (halten das heutige Verhalten fest) ───
 // Engine-Funktionen und Konstanten für Tests in Node (Funktionen/Konstanten des vm-Kontexts)
-const E = g('({ simulate, maxNet, monthsIn, retireStartAbs, monthsRetired, avdPayStartAbs, depotYear, depotSell, makeDepot, kapTax, lawYear, makeLoans, loanMonth, loanPreview, annuityM, loanRateM, absM, tariffFor, idxVal, rwFor, SV, AVD, LAW, mk })');
+const E = g('({ simulate, maxNet, monthsIn, retireStartAbs, monthsRetired, avdPayStartAbs, depotYear, depotSell, makeDepot, kapTax, lawYear, makeLoans, loanMonth, loanPreview, annuityM, loanRateM, absM, tariffFor, lawPick, idxVal, rwFor, SV, AVD, LAW, mk })');
 const sumA = a => a.reduce((x, y) => x + y, 0);
 
 // 12. Entnahmestrategien: ewige Rente, festes Netto, Erschöpfung
@@ -256,6 +256,11 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('tariffFor 2027 ohne Entwurf: Tarif 2026', E.tariffFor(2027, { ...ix, useDraft: false }).p === E.LAW.tariff[2026]);
   check('tariffFor ohne Indexierung: Faktor 1', E.tariffFor(2035, { ...ix, indexTariff: false }).idx === 1);
   check('idxVal bbgRV 2030', near(E.idxVal(E.SV.bbgRV, 2030, 0.03), 106200 * Math.pow(1.03, 3), 1e-6));
+  const lt = { 2026: 1, 2027: { v: 2, st: 'E' } };
+  check('lawPick ohne Entwurf: 2026', E.lawPick(lt, 2030, false).v === 1 && E.lawPick(lt, 2030, false).y === 2026);
+  check('lawPick mit Entwurf: 2027', E.lawPick(lt, 2030, true).v === 2 && E.lawPick(lt, 2030, true).y === 2027);
+  check('lawPick vor erstem Jahr: erster Eintrag', E.lawPick(E.LAW.tariff, 2025).y === 2026);
+  check('lawPick anPausch', E.lawPick(E.LAW.pausch.anPausch, 2030, true).v === 1430 && E.lawPick(E.LAW.pausch.anPausch, 2030, false).v === 1230);
   const A0 = g('ASSUME'), r = y => E.rwFor(y, A0) / E.rwFor(y - 1, A0);
   check('rwFor: ab 2032 gedämpftes Wachstum', near(r(2031), 1 + A0.wageGrowth, 1e-12) && near(r(2032), 1 + A0.wageGrowth - A0.rentenDaempfung, 1e-12) && r(2032) < r(2031));
 }

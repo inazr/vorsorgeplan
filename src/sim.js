@@ -12,10 +12,8 @@ const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohne
 };
 
 function idxVal(table, year, growth) { // Wert aus Tabelle, danach mit growth fortgeschrieben
-  const ys = Object.keys(table).map(Number).sort((a, b) => a - b);
-  let base = ys[0];
-  for (const y of ys) if (y <= year) base = y;
-  return table[base] * Math.pow(1 + growth, Math.max(0, year - base));
+  const { y: base, v } = lawPick(table, year);
+  return v * Math.pow(1 + growth, Math.max(0, year - base));
 }
 
 // Rentenwert: Anpassung = Lohnwachstum, nach Ende der Haltelinie (2031) gedämpft
@@ -26,14 +24,14 @@ function rwFor(year, A) {
 }
 function lawYear(year, A, priceIdx) {
   const { p, idx } = tariffFor(year, { useDraft: A.useDraft, indexTariff: A.indexTariff, inflation: A.inflation });
-  const lastKid = Math.max(...Object.keys(LAW.kinder).filter(y => A.useDraft || LAW.kinder[y].st !== 'E').map(Number));
-  const kYear = Math.min(year, lastKid), kIdx = year > lastKid && A.indexTariff ? Math.pow(1 + A.inflation, year - lastKid) : 1;
+  const { y: kY, v: kd } = lawPick(LAW.kinder, year, A.useDraft);
+  const kIdx = year > kY && A.indexTariff ? Math.pow(1 + A.inflation, year - kY) : 1;
   const w = A.wageGrowth;
   return {
     year, p, idx,
     soliFG: LAW.soli.freigrenzeSplit * (A.indexTariff ? Math.max(1, Math.pow(1 + A.inflation, year - 2026)) : 1),
-    kfb: LAW.kinder[kYear].kfb * kIdx, kg: LAW.kinder[kYear].kg * kIdx * 12,
-    anPausch: (A.useDraft && year >= 2027 ? 1430 : 1230) * kIdx,
+    kfb: kd.kfb * kIdx, kg: kd.kg * kIdx * 12,
+    anPausch: lawPick(LAW.pausch.anPausch, year, A.useDraft).v * kIdx,
     bbgRV: idxVal(SV.bbgRV, year, w), bbgKV: idxVal(SV.bbgKV, year, w), de: idxVal(SV.de, year, w),
     rw: rwFor(year, A), bez: idxVal(SV.bez, year, w),
     zus: A.zusatz + A.zusatzDrift * Math.max(0, year - 2026),
