@@ -149,6 +149,57 @@ function polFields(o, k, v, io, pay) {
   o[k] = v; o[k + 'In'] = m(io, x => x.c + x.z); o[k + 'Pay'] = m(pay, x => x.gross); o[k + 'PayW'] = m(pay, x => x.W);
 }
 
+// KV/PV der Rentner je Person (eigener Anteil). Kapitalerträge hälftig je Ehegatte.
+function kvRetire(ctx, y, kapPerPerson) {
+  const { persons, kv } = ctx, { year, L, pvZu, grv, avdPay, polGross, lumpKV } = y;
+  let tot = 0, deductible = 0;
+  const per = persons.map(() => 0);
+  persons.forEach((p, i) => {
+    const m = monthsRetired(p, year);
+    if (m <= 0) return;
+    const f = m / 12, bbg = L.bbgKV * f;
+    const pvRate = L.pv + pvZu;
+    if (kv[i].pkv) {   // Private KV: Beitrag unabhängig vom Einkommen, Zuschuss der DRV (§ 106 SGB VI) max. halber Beitrag
+      const g = Math.pow(1 + (p.pkvGrowth ?? 0.03), year - 2026);
+      const prem = Math.max(0, (p.pkvPremium - (p.pkvRelief || 0)) * g) * 12 * f;
+      const zus = Math.min(grv[i] * (SV.kvGen + L.zus) / 2, prem / 2);
+      const c = prem - zus;
+      tot += c; deductible += Math.max(0, prem * (p.pkvBasis ?? 0.85) - zus); per[i] = c;
+      return;
+    }
+    const bR = Math.min(grv[i], bbg);
+    let c = bR * ((SV.kvGen + L.zus) / 2 + pvRate);   // KVdR und freiwillig: DRV trägt die Hälfte der KV
+    // KVdR-Pflichtversicherte: nach § 237 SGB V zählen nur Rente, Versorgungsbezüge (§ 229) und Arbeitseinkommen.
+    // Das AVD gehört zur privaten Vorsorge und steht nicht im Katalog des § 229 (betrieblich nimmt § 229 Abs. 1 Nr. 5 Altersvorsorgevermögen nach § 92 EStG sogar aus).
+    if (!kv[i].ok) {
+      const rest = Math.max(0, bbg - bR);
+      // Freiwillig: Beiträge auch auf Versicherungsrenten (voller Zahlbetrag) und Kapitalauszahlungen
+      const sonst = Math.max(0, avdPay[i].gross + polGross[i] + lumpKV[i] + kapPerPerson * f);
+      const bS = Math.min(sonst, rest);
+      const fehl = Math.max(0, L.bez / 3 * f - bR - bS);   // Mindestbemessung
+      c += (bS + fehl) * (SV.kvErm + L.zus + pvRate);
+    }
+    tot += c; deductible += c; per[i] = c;
+  });
+  return { tot, deductible, per };
+}
+
+// Steuer + SV für gegebenen ETF-Verkauf G (Probeverkauf, das Depot bleibt unverändert)
+function evalYear(ctx, y, G) {
+  const { I, A, depot, pb, wStartAbs, pendingKap } = ctx, { L, nKids, otherIncome, vorsorge, inWithdraw, yearAbs0 } = y;
+  const sale = G > 0 ? depotSell(depot, G, I.depot.sellMode, true) : { sold: 0, taxable: 0 };
+  const kapT = pendingKap + sale.taxable;
+  // KV-Basis freiwillig: Gewinn inkl. Ausschüttung/VP, ohne Sparerpauschbetrag; Teilfreistellung per Schalter
+  const kapForKV = Math.max(0, A.kvTeilfreistellung ? kapT : kapT / 0.7);
+  const kvR = kvRetire(ctx, y, kapForKV / 2);
+  const zvE = Math.max(0, otherIncome - vorsorge - kvR.deductible - LAW.pausch.sonderausg);
+  const it = incomeTax(zvE, nKids, L);
+  const kt = kapTax(kapT, depot.lossCarry, L, zvE, nKids, A, pb);
+  // Steuer auf Vorabpauschale/Ausschüttungen des Vorjahres ist im Januar fällig, Steuer auf Verkäufe in der Entnahme
+  kt.taxW = !inWithdraw ? 0 : wStartAbs <= yearAbs0 ? kt.tax : Math.max(0, kt.tax - kapTax(pendingKap, depot.lossCarry, L, zvE, nKids, A, pb).tax);
+  return { sale, it, kt, kvR, zvE };
+}
+
 // ═══════════════════════════════════════════════════════════════
 // simulate(I, A, opt)
 //   opt.scenario: 'A' (nur ETF) | 'B' (eingeschaltete Vorsorgeprodukte, Rest ETF)
@@ -193,11 +244,12 @@ function simulate(I, A, opt) {
   const loans = makeLoans(I.loans || [], Y0 * 12);
   const pb = I.depot.freistellung ?? LAW.sparerPB;   // Freistellungsauftrag für das ETF-Depot
 
-  let priceIdx = 1, pendingKap = 0, pendingRefund = 0, depleted = false, depletedYear = null;
+  let priceIdx = 1, pendingRefund = 0, depleted = false, depletedYear = null;
   let sumZulagen = 0, sumRefunds = 0, houseSale = null, sumBasisRefund = 0;
   const rows = [];
   const sum = a => a.reduce((x, y) => x + y, 0);
   let startReal = I.depot.startValue;   // reales Nettovermögen zu Entnahmebeginn (Ende des Vorjahres)
+  const ctx = { I, A, persons, depot, kv, pb, wStartAbs, pendingKap: 0 };
 
   for (let year = Y0; year <= endYear; year++) {
     const t = year - Y0;
@@ -395,54 +447,8 @@ function simulate(I, A, opt) {
     const wkRente = pensionPers.filter(Boolean).length * LAW.pausch.rentnerWK;
     const otherIncome = zvEBase + grvTaxable.reduce((a, b) => a + b, 0) + avdPay.reduce((s, a) => s + a.taxable, 0) + sum(polTaxable) - wkRente;
 
-    // KV/PV der Rentner je Person (eigener Anteil). Kapitalerträge hälftig je Ehegatte.
-    function kvRetire(kapPerPerson) {
-      let tot = 0, deductible = 0;
-      const per = persons.map(() => 0);
-      persons.forEach((p, i) => {
-        const m = monthsRetired(p, year);
-        if (m <= 0) return;
-        const f = m / 12, bbg = L.bbgKV * f;
-        const pvRate = L.pv + pvZu;
-        if (kv[i].pkv) {   // Private KV: Beitrag unabhängig vom Einkommen, Zuschuss der DRV (§ 106 SGB VI) max. halber Beitrag
-          const g = Math.pow(1 + (p.pkvGrowth ?? 0.03), year - 2026);
-          const prem = Math.max(0, (p.pkvPremium - (p.pkvRelief || 0)) * g) * 12 * f;
-          const zus = Math.min(grv[i] * (SV.kvGen + L.zus) / 2, prem / 2);
-          const c = prem - zus;
-          tot += c; deductible += Math.max(0, prem * (p.pkvBasis ?? 0.85) - zus); per[i] = c;
-          return;
-        }
-        const bR = Math.min(grv[i], bbg);
-        let c = bR * ((SV.kvGen + L.zus) / 2 + pvRate);   // KVdR und freiwillig: DRV trägt die Hälfte der KV
-        // KVdR-Pflichtversicherte: nach § 237 SGB V zählen nur Rente, Versorgungsbezüge (§ 229) und Arbeitseinkommen.
-        // Das AVD gehört zur privaten Vorsorge und steht nicht im Katalog des § 229 (betrieblich nimmt § 229 Abs. 1 Nr. 5 Altersvorsorgevermögen nach § 92 EStG sogar aus).
-        if (!kv[i].ok) {
-          const rest = Math.max(0, bbg - bR);
-          // Freiwillig: Beiträge auch auf Versicherungsrenten (voller Zahlbetrag) und Kapitalauszahlungen
-          const sonst = Math.max(0, avdPay[i].gross + polGross[i] + lumpKV[i] + kapPerPerson * f);
-          const bS = Math.min(sonst, rest);
-          const fehl = Math.max(0, L.bez / 3 * f - bR - bS);   // Mindestbemessung
-          c += (bS + fehl) * (SV.kvErm + L.zus + pvRate);
-        }
-        tot += c; deductible += c; per[i] = c;
-      });
-      return { tot, deductible, per };
-    }
-
-    // Steuer + SV für gegebenen ETF-Verkauf (dry run)
-    function evalYear(G, dry) {
-      const sale = G > 0 ? depotSell(depot, G, I.depot.sellMode, true) : { sold: 0, taxable: 0 };
-      const kapT = pendingKap + sale.taxable;
-      // KV-Basis freiwillig: Gewinn inkl. Ausschüttung/VP, ohne Sparerpauschbetrag; Teilfreistellung per Schalter
-      const kapForKV = Math.max(0, A.kvTeilfreistellung ? kapT : kapT / 0.7);
-      const kvR = kvRetire(kapForKV / 2);
-      const zvE = Math.max(0, otherIncome - vorsorge - kvR.deductible - LAW.pausch.sonderausg);
-      const it = incomeTax(zvE, nKids, L);
-      const kt = kapTax(kapT, depot.lossCarry, L, zvE, nKids, A, pb);
-      // Steuer auf Vorabpauschale/Ausschüttungen des Vorjahres ist im Januar fällig, Steuer auf Verkäufe in der Entnahme
-      kt.taxW = !inWithdraw ? 0 : wStartAbs <= yearAbs0 ? kt.tax : Math.max(0, kt.tax - kapTax(pendingKap, depot.lossCarry, L, zvE, nKids, A, pb).tax);
-      return { sale, it, kt, kvR, zvE };
-    }
+    const y = { year, L, pvZu, nKids, grv, avdPay, polGross, lumpKV, otherIncome, vorsorge, inWithdraw, yearAbs0 };
+    const evalY = G => evalYear(ctx, y, G);
 
     let G = 0, ev, extraInvest = 0, netIncome = 0, target = 0, shortfall = false;
     const grossW = sum(grvW) + sum(avdW) + sum(polW);
@@ -453,7 +459,7 @@ function simulate(I, A, opt) {
     let houseG = 0;
     if (payoffOut > 0) {
       let lo = 0, hi = depotValue(depot);
-      for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; const e = evalYear(mid, true); const net = mid - e.kt.tax; if (net < payoffOut) lo = mid; else hi = mid; }
+      for (let k = 0; k < 40; k++) { const mid = (lo + hi) / 2; const e = evalY(mid); const net = mid - e.kt.tax; if (net < payoffOut) lo = mid; else hi = mid; }
       houseG = hi;
     }
 
@@ -461,7 +467,7 @@ function simulate(I, A, opt) {
       if (I.withdraw.strategy !== 'fixedNet') target = opt.targetReal * wMonths * priceIdx;
       else target = I.withdraw.fixedNet * wMonths * (I.withdraw.fixedIndexed ? priceIdx : 1);
       target += loanInW + payoffInW;   // Kreditraten und Ablösung in den Entnahmemonaten zusätzlich
-      const netOf = g => { const e = evalYear(g, true); return { net: grossW + g - e.it.total * wT - e.kt.taxW - sum(e.kvR.per.map((c, i) => c * kvShare[i])), e }; };
+      const netOf = g => { const e = evalY(g); return { net: grossW + g - e.it.total * wT - e.kt.taxW - sum(e.kvR.per.map((c, i) => c * kvShare[i])), e }; };
       const n0 = netOf(0);
       if (n0.net >= target) { G = 0; ev = n0.e; extraInvest = n0.net - target; netIncome = target; }
       else {
@@ -475,7 +481,7 @@ function simulate(I, A, opt) {
         }
       }
     } else {
-      ev = evalYear(houseG, true);
+      ev = evalY(houseG);
     }
 
     // Verkauf ausführen
@@ -546,7 +552,7 @@ function simulate(I, A, opt) {
     const dy = depotYear(depot, year, mk.R, etfContrib, L.basiszins, buyTiming([[savePart, 0, saveMonths || 12], [extraInvest, wm0, wm1], [avdReinvest - lumpNet, 0, 12], [lumpNet, lumpM, 12]]));
     // Ausschüttungen brutto in aktiven Fonds (FIFO-Staffelung)
     if (dy.reinvestGross > 0) depotBuy(depot, I.depot.divRedirect ? dy.activeIdx : 0, dy.reinvestGross, year);
-    pendingKap = dy.distTaxable + dy.vpTaxable;
+    ctx.pendingKap = dy.distTaxable + dy.vpTaxable;
 
     // ── Markt: Altersvorsorgedepot ──
     persons.forEach((p, i) => {
