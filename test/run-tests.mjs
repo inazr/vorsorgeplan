@@ -6,13 +6,22 @@ import vm from 'node:vm';
 
 const root = join(dirname(fileURLToPath(import.meta.url)), '..');
 const ctx = vm.createContext({ console, Math, JSON });
-for (const f of ['law', 'depot', 'insurance', 'loans', 'sim', 'defaults', 'analysis'])
+const ENGINE_FILES = ['law', 'depot', 'insurance', 'loans', 'sim', 'defaults', 'analysis'];
+for (const f of ENGINE_FILES)
   vm.runInContext(readFileSync(join(root, 'src', f + '.js'), 'utf8'), ctx);
 const g = code => vm.runInContext(code, ctx);
+// Hilfsfunktion im vm-Kontext: tiefe Kopien von DEFAULTS/ASSUME, f(I, A) passt sie an
+vm.runInContext(`function mk(f) { const I = JSON.parse(JSON.stringify(DEFAULTS)), A = JSON.parse(JSON.stringify(ASSUME)); if (f) f(I, A); return { I, A }; }`, ctx);
+const mn = (patch, scen = 'B') => g(`(() => { const { I, A } = mk(${patch || 'null'}); return maxNet(I, A, '${scen}'); })()`);
 
 let fail = 0, ok = 0;
+const GOLD = { baseA: 9080, baseB: 9401, perpetual: 7716, pkv: 9041, freiwillig: 8480, noDraft: 9413, noIndex: 8541, kinderlos: 9364, avdNone: 9320, avdExtra: 9143,
+  basisSame: 8293, basisEtf: 8624, basisNone: 8025, prvKapital: 9332, prvKapital61: 9318, selfRv: 9402, self: 8404, saveLast: 8935, bm7: 9330, loanTeil: 6512,
+  baseB_startReal: 1299706, baseB_finalReal: 167, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
 const check = (name, cond, info = '') => { if (cond) ok++; else { fail++; console.log('FEHLER', name, info); } };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
+// Golden Master: pinnt die heutigen Ergebnisse (±1 €), damit Umbauten keine Werte verschieben
+const gold = (name, v) => check(`Gold ${name}`, GOLD[name] !== undefined && near(v, GOLD[name], 1), `${Math.round(v)} statt ${GOLD[name]}`);
 
 // 1. Einkommensteuertarif gegen Prüfwerte (Einzeltarif, Euro)
 const vec = { 15000: [435, 397, 338], 30000: [4217, 4172, 4108], 50000: [10548, 10482, 10419], 70600: [18516, 18410, 18346], 100000: [30864, 30758, 30694], 250000: [93864, 93758, 93694], 300000: [115529, 116658, 116594] };
@@ -42,8 +51,29 @@ const r = g(`(() => { const I = JSON.parse(JSON.stringify(DEFAULTS)); const nA =
   let d = 0; for (const x of s.rows) { d = Math.max(d, Math.abs(x.pp.reduce((a, p) => a + p.total, 0) - x.total)); if (x.phase === 'Entnahme') d = Math.max(d, Math.abs(x.pp.reduce((a, p) => a + p.net, 0) - x.net)); }
   return { nA, nB, d, depleted: s.depleted }; })()`);
 check('Personen-Summen', r.d < 0.01, r.d);
-check('Netto plausibel', r.nA > 500 && r.nA < 20000, r.nA);
+gold('baseA', r.nA); gold('baseB', r.nB);
 check('Plan reicht bis Zielalter', !r.depleted);
+const T = 'I.persons[0]', U = 'I.persons[1]', basis = m => `(I, A) => { ${T}.basis.on = true; ${T}.basis.beitrag = 6000; ${T}.basis.refundTo = '${m}'; }`, prvK = x => `(I, A) => { ${U}.prv.on = true; ${U}.prv.mode = 'kapital'; ${x} }`;
+const VARIANTS = {
+  perpetual: ["(I, A) => { I.withdraw.strategy = 'perpetual'; }"],
+  pkv: ["(I, A) => I.persons.forEach(p => p.kvdr = 'pkv')"],
+  freiwillig: ["(I, A) => I.persons.forEach(p => p.kvdr = 'nein')"],
+  noDraft: ['(I, A) => { A.useDraft = false; }'],
+  noIndex: ['(I, A) => { A.useDraft = false; A.indexTariff = false; }'],
+  kinderlos: ['(I, A) => { I.children = []; }'],
+  avdNone: ["(I, A) => I.persons.forEach(p => p.avd.refundTo = 'none')"],
+  avdExtra: ['(I, A) => I.persons.forEach(p => p.avd.extra = 3000)'],
+  basisSame: [basis('same')], basisEtf: [basis('etf')], basisNone: [basis('none')],
+  prvKapital: [prvK('')], prvKapital61: [prvK(`${U}.prv.payStart = 61;`)],
+  selfRv: [`(I, A) => { ${T}.job = 'self'; ${T}.rvPflicht = true; }`],
+  self: [`(I, A) => { ${T}.job = 'self'; ${T}.rvPflicht = false; }`],
+  saveLast: [`(I, A) => { I.saveUntil = 'last'; ${U}.retireAge = 64; }`],
+  bm7: ['(I, A) => I.persons.forEach(p => p.bm = 7)'],
+  loanTeil: ["(I, A) => { I.loans = [{ name: 'T', amount: 300000, eff: 0.035, startY: 2026, startM: 1, monthly: 1350, freeMonths: 0, fixBalBank: 0, fixEndY: 2036, fixEndM: 1, sonder: 0, sonderFrom: 2026, sonderTo: 2035, after: 'teil', zins: 0.04, years: 20, teil: 50000 }]; }"],
+};
+for (const [name, [patch, scen]] of Object.entries(VARIANTS)) { const v = mn(patch, scen); gold(name, v); }
+const gb = g(`(() => { const { I, A } = mk(null); const s = simulate(I, A, { scenario: 'B', targetReal: maxNet(I, A, 'B') }); return { startReal: s.startReal, finalReal: s.finalReal, sumZulagen: s.sumZulagen, sumRefunds: s.sumRefunds }; })()`);
+for (const [k2, v] of Object.entries(gb)) { gold('baseB_' + k2, v); }
 console.log(`Beispielhaushalt: Netto A ${r.nA.toFixed(0)} €, B ${r.nB.toFixed(0)} € pro Monat (heutige Kaufkraft)`);
 
 // 6. Kredit-Ablösung aus dem Depot verringert das Depot
