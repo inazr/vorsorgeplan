@@ -12,7 +12,6 @@
 // ═══════════════════════════════════════════════════════════════
 const INS = {
   basisMinAge: 62,                 // Basisrente frühestens ab 62 (Verträge ab 2012, § 10 Abs. 1 Nr. 2 b EStG)
-  hb: { 2026: 30826, 2027: 32308 }, // Höchstbetrag Altersvorsorgeaufwendungen je Person (§ 10 Abs. 3 EStG), 2027 nach Kabinettsbeschluss
   halfAge: 62, halfYears: 12,      // Hälftelung bei Kapitalauszahlung (§ 20 Abs. 1 Nr. 6 S. 2, § 52 Abs. 28 S. 7 EStG)
   fondsFrei: 0.15,                 // fondsgebundene Versicherung: 15 % des Unterschiedsbetrags steuerfrei (§ 20 Abs. 1 Nr. 6 S. 9)
   akvMonths: 60,                   // Abschlusskosten verteilt auf die ersten 5 Jahre (§ 169 Abs. 3 VVG)

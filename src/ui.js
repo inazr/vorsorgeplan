@@ -423,7 +423,7 @@ function basisCard(i) {
       ${S(b + '.refundTo', 'Steuererstattung fließt', REFUND_OPTS('basis'), { h: 'Kommt im Folgejahr' })}
     </div>
     ${costFields(b, c)}
-    <div class="facts" id="basisfacts-${i}"></div>` : `<p class="note">Beiträge sind bis zum Höchstbetrag (2026: ${eur(idxVal(INS.hb, 2026, 0))} je Person, abzüglich Arbeitnehmer- und Arbeitgeberbeitrag zur gesetzlichen Rente) als Sonderausgaben abziehbar. Die Rente ist wie die gesetzliche Rente zu versteuern, lebenslang, nicht vererbbar und nicht kapitalisierbar.</p>`}
+    <div class="facts" id="basisfacts-${i}"></div>` : `<p class="note">Beiträge sind bis zum Höchstbetrag (2026: ${eur(hbYear(2026))} je Person, abzüglich der Beiträge zur gesetzlichen Rente, bei Angestellten Arbeitnehmer- und Arbeitgeberanteil) als Sonderausgaben abziehbar. Die Rente ist wie die gesetzliche Rente zu versteuern, lebenslang, nicht vererbbar und nicht kapitalisierbar.</p>`}
   </div>`;
 }
 function prvCard(i) {
@@ -454,7 +454,7 @@ function fundsHtml() {
     </div></div>`).join('');
 }
 function legalTable() {
-  const n = nf0.format, t26 = LAW.tariff[2026], t27 = LAW.tariff[2027], t28 = LAW.tariff[2028], k26 = LAW.kinder[2026], hb = y => idxVal(INS.hb, y, 0);
+  const n = nf0.format, t26 = LAW.tariff[2026], t27 = LAW.tariff[2027], t28 = LAW.tariff[2028], k26 = LAW.kinder[2026], hb = hbYear, rs = y => pc(lawPick(SV.rvSatz, y).v);
   const rw = SV.rw[2026].toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' €';
   const zulMax = AVD.g1 * AVD.g1Cap + AVD.g2 * (AVD.fMax - AVD.g1Cap);
   const rows = [
@@ -473,8 +473,8 @@ function legalTable() {
     ['Altersvorsorgedepot', `Auszahlung ab ${AVD.payMin} bis ${AVD.payMax}, Plan bis mind. ${AVD.planEndMin}, bis ${pc(AVD.teilMax, 0)} Einmalbetrag`, 'G', '§ 1 AltZertG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', 'Geförderter Teil voll steuerpflichtig, ungeförderter Teil nur der Ertrag, nach 12 Jahren und ab 62 zur Hälfte; keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 S. 2 c EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'G', '§§ 237, 229 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__237.html'],
-    ['Basisrente', `Höchstbetrag ${eur(hb(2026))} je Person (2026), gemeinsam bei Zusammenveranlagung, minus AN- und AG-Beitrag zur GRV`, 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
-    ['Basisrente', `Höchstbetrag 2027: ${eur(hb(2027))} (knappschaftliche BBG 130.800 € laut Kabinettsbeschluss)`, 'E', 'SV-Rechengrößenverordnung 2027', ''],
+    ['Basisrente', `Höchstbetrag ${eur(hb(2026))} je Person (2026), gemeinsam bei Zusammenveranlagung, minus Beiträge zur GRV (AN- und AG-Anteil, Selbständige voller Beitrag)`, 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
+    ['Basisrente', `Höchstbetrag 2027: ${eur(hb(2027))} (knappschaftliche BBG ${eur(lawPick(SV.bbgKn, 2027).v)} × ${pc(lawPick(SV.rvSatz, 2027).v + SV.knAufschlag)})`, 'E', 'SV-Rechengrößenverordnung 2027', ''],
     ['Basisrente', `Rente frühestens ab ${INS.basisMinAge}, Besteuerung wie gesetzliche Rente`, 'G', '§ 22 Nr. 1 S. 3 a aa EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Basisrente, private RV', 'Kostenarten wie im Produktinformationsblatt', 'G', '§ 2a AltZertG, AltvPIBV', 'https://www.gesetze-im-internet.de/altzertg/__2a.html'],
     ['Private Rentenversicherung', `Rente mit Ertragsanteil (${pc(ertragsanteil(SV.rentenAlter), 0)} bei Beginn mit ${SV.rentenAlter})`, 'G', '§ 22 Nr. 1 S. 3 a bb EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
@@ -483,6 +483,9 @@ function legalTable() {
     ['Krankenversicherung', `Kapitalauszahlung bei freiwillig Versicherten: 1/${INS.kvLumpMonths} über ${INS.kvLumpMonths / 12} Jahre`, 'A', 'Annahme analog § 229 SGB V', ''],
     ['Rentenversicherung', `Rentenwert ${rw} ab 1.7.2026, BBG 2026 ${eur(lawPick(SV.bbgRV, 2026).v)}`, 'G', 'SGB VI, RV-Rechengrößen', 'https://www.deutsche-rentenversicherung.de/'],
     ['Rentenversicherung', `BBG 2027 ${eur(lawPick(SV.bbgRV, 2027).v)}`, 'E', 'SV-Rechengrößenverordnung 2027 (Kabinett 7.10.2026)', ''],
+    ['Rentenversicherung', `Beitragssatz ${rs(2026)} (2026)`, 'G', '§ 158 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__158.html'],
+    ['Rentenversicherung', `Beitragssatz 2027 ${rs(2027)}`, 'E', 'SV-Rechengrößen 2027 (Kabinett 7.10.2026)', ''],
+    ['Rentenversicherung', `Beitragssatz ab 2028 ${rs(2028)} (Vorausschätzung)`, 'A', 'DRV, Bundesvertreterversammlung 11.6.2026', 'https://www.deutsche-rentenversicherung.de/DRV/DE/Ueber-uns-und-Presse/Presse/Pressemitteilungen/Pressemitteilungen-aktuell/2026/2026-06-11-bvv-gunkel.html'],
     ['Rentenversicherung', 'Haltelinie 48 % bis 2031, danach Dämpfung (Schalter)', 'G', 'Rentenpaket 2025', ''],
     ['Rentenversicherung', `Regelaltersgrenze ${SV.rentenAlter}, Abschlag 0,3 % je Monat`, 'G', '§§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__77.html'],
     ['Krankenversicherung', `BBG 2026 ${eur(lawPick(SV.bbgKV, 2026).v)}, Zusatzbeitrag Ø ${pc(ASSUME.zusatz)}`, 'G', 'SGB V, BStabG', ''],

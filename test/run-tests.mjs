@@ -19,9 +19,13 @@ let fail = 0, ok = 0;
 // basisSame 8293 → 8305, basisEtf 8624 → 8637, basisNone 8025 → 8039, prvKapital 9332 → 9346, prvKapital61 9318 → 9332, selfRv 9402 → 9417, self 8404 → 8417, saveLast 8935 → 8948, bm7 9330 → 9344, loanTeil 6512 → 6520, baseB_finalReal 167 → 155
 // Task 13: Rentenwert gilt ab 1.7. (Jan-Jun Vorjahreswert), Netto sinkt leicht, baseA 9080 → 9041, baseB 9416 → 9378, perpetual 7730 → 7693, pkv 9054 → 9007, freiwillig 8493 → 8455, noDraft 9426 → 9389, noIndex 8572 → 8542, kinderlos 9386 → 9349, avdNone 9320 → 9283, avdExtra 9541 → 9505, basisSame 8305 → 8270, basisEtf 8637 → 8601, basisNone 8039 → 8002, prvKapital 9346 → 9309, prvKapital61 9332 → 9295, selfRv 9417 → 9379, self 8417 → 8392, saveLast 8948 → 8914, bm7 9344 → 9308, loanTeil 6520 → 6481, baseB_finalReal 155 → 164
 // Task 14: KV-Basis freiwillig ohne 51-€-Abzug, freiwillig 8455 → 8454 (genauer 8454,59 → 8454,10); prvKapital61 unverändert, weil das Depot im Auszahlungsjahr den Sparerpauschbetrag schon verbraucht (pbRest = 0)
-const GOLD = { baseA: 9041, baseB: 9378, perpetual: 7693, pkv: 9007, freiwillig: 8454, noDraft: 9389, noIndex: 8542, kinderlos: 9349, avdNone: 9283, avdExtra: 9505,
-  basisSame: 8270, basisEtf: 8601, basisNone: 8002, prvKapital: 9309, prvKapital61: 9295, selfRv: 9379, self: 8392, saveLast: 8914, bm7: 9308, loanTeil: 6481,
-  baseB_startReal: 1299706, baseB_finalReal: 164, baseB_sumZulagen: 45465, baseB_sumRefunds: 14779 };
+// Task 15: RV-Satz jahresweise (2028: 19,9 % laut DRV), Höchstbetrag aus knappschaftlicher BBG, RV-pflichtige Selbständige mit vollem Beitrag im Vorsorgeabzug.
+//   Höherer Vorsorgeabzug senkt den Grenzsteuersatz und damit die § 10a-Erstattung (die Lohnsteuer selbst wirkt nicht aufs Sparbudget), daher sinkt selfRv: 9379 → 9358 (9379,39 → 9358,40, davon 18,55 aus dem Selbständigen-Abzug).
+//   19,9 % ab 2028: baseA 9041 (9040,53 → 9041,02), baseB 9378 → 9377 (9378,42 → 9377,44), perpetual 7693 → 7692 (7692,87 → 7692,38), noIndex 8542 → 8541 (8542,48 → 8541,50), pkv 9007 → 9006, freiwillig 8454 → 8453 (8454,10 → 8453,13), noDraft 9389 → 9388, kinderlos 9349 → 9348, avdExtra 9505 → 9504, basisSame 8270 → 8267, basisEtf 8601 → 8597,
+//   basisNone 8002 → 8000, prvKapital 9309 → 9308 (9309,08 → 9308,11), prvKapital61 9295 → 9293, self 8392 → 8391, saveLast 8914 → 8913, bm7 9308 → 9307, baseB_startReal 1299706 → 1299438, baseB_finalReal 164 → 68, baseB_sumRefunds 14779 → 14606
+const GOLD = { baseA: 9041, baseB: 9377, perpetual: 7692, pkv: 9006, freiwillig: 8453, noDraft: 9388, noIndex: 8541, kinderlos: 9348, avdNone: 9283, avdExtra: 9504,
+  basisSame: 8267, basisEtf: 8597, basisNone: 8000, prvKapital: 9308, prvKapital61: 9293, selfRv: 9358, self: 8391, saveLast: 8913, bm7: 9307, loanTeil: 6481,
+  baseB_startReal: 1299438, baseB_finalReal: 68, baseB_sumZulagen: 45465, baseB_sumRefunds: 14606 };
 const check = (name, cond, info = '') => { if (cond) ok++; else { fail++; console.log('FEHLER', name, info); } };
 const near = (a, b, tol) => Math.abs(a - b) <= tol;
 // Golden Master: pinnt die heutigen Ergebnisse (±1 €), damit Umbauten keine Werte verschieben
@@ -335,6 +339,22 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
     basis: { beitrag: [0, 1200, 2400, 4800, 9600, 19200], payStart: [62, 65, 67, 70] },
     prv: { beitrag: [0, 1200, 2400, 4800, 9600], payStart: [62, 65, 67, 70], mode: ['rente', 'teil', 'kapital'] } };
   check('OPT_SPACE entspricht dem alten Literal', g('JSON.stringify(OPT_SPACE)') === JSON.stringify(alt), g('JSON.stringify(OPT_SPACE)'));
+}
+
+// 23. RV-Satz jahresweise, Höchstbetrag aus knappschaftlicher BBG (§ 10 Abs. 3 S. 1 EStG), RV-pflichtige Selbständige
+{
+  const hb = y => g(`typeof hbFor === 'function' ? hbFor(lawYear(${y}, ASSUME, 1)) : NaN`), hy = y => g(`typeof hbYear === 'function' ? hbYear(${y}) : NaN`);
+  check('hbFor 2026', hb(2026) === 30826, hb(2026));
+  check('hbFor 2027', hb(2027) === 32308, hb(2027));
+  check('hbYear wie hbFor', hy(2026) === 30826 && hy(2027) === 32308, `${hy(2026)} / ${hy(2027)}`);
+  // Person 1 selbständig (40.000 €), Person 2 angestellt (60.000 €), je 30.000 € Basisrente: der Höchstbetrag bindet
+  const rv = g(`(() => { const f = x => { const { I, A } = mk((I, A) => { I.budget.monthly = 6000; I.persons.forEach(p => { p.basis.on = true; p.basis.beitrag = 30000; }); ${T}.job = 'self'; ${T}.rvPflicht = x; });
+      return simulate(I, A, { scenario: 'B', targetReal: 1000, detail: true }).rows[0]; };
+    const a = f(true), b = f(false), L = lawYear(a.year, ASSUME, 1), hb = typeof hbFor === 'function' ? hbFor(L) : NaN, rs = L.rvSatz ?? 0.186;
+    return { estA: a.est, estB: b.est, dedA: a.basisDed, dedB: b.basisDed, hb, rs, bbg: L.bbgRV }; })()`);
+  check('selfRv: höherer Vorsorgeabzug, weniger Einkommensteuer', rv.estA < rv.estB - 1000, `${rv.estA} / ${rv.estB}`);
+  check('self: Höchstbetrag minus AN- und AG-Beitrag von Person 2', near(rv.dedB, 2 * rv.hb - rv.rs * Math.min(60000, rv.bbg), 0.01), `${rv.dedB}`);
+  check('selfRv: Höchstbetrag zusätzlich um den vollen RV-Beitrag gekürzt', near(rv.dedB - rv.dedA, rv.rs * 40000, 0.01), `${rv.dedB - rv.dedA}`);
 }
 
 console.log(`${ok} Prüfungen bestanden, ${fail} fehlgeschlagen`);

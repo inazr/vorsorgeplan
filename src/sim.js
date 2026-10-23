@@ -9,7 +9,11 @@ const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohne
   de: { 2026: 51944, 2027: { v: 53452, st: 'E' } },          // Durchschnittsentgelt (vorläufig)
   bez: { 2026: 47460, 2027: { v: 49560, st: 'E' } },         // Bezugsgröße p.a.
   rw: { 2025: 40.79, 2026: 42.52 },          // aktueller Rentenwert ab 1.7.
-  rvAN: 0.093, kvGen: 0.146, kvErm: 0.140, pv: 0.036, pvKinderlos: 0.006,
+  // Beitragssatz allgemeine RV (§ 158 SGB VI); 2027 Kabinett 7.10.2026, 2028 Vorausschätzung DRV (Bundesvertreterversammlung 11.6.2026)
+  rvSatz: { 2026: 0.186, 2027: { v: 0.186, st: 'E' }, 2028: { v: 0.199, st: 'A' } },
+  bbgKn: { 2026: 124800, 2027: { v: 130800, st: 'E' } },     // BBG knappschaftliche RV
+  knAufschlag: 0.061,                        // Satz knappschaftliche RV minus allgemeiner Satz (24,7 % − 18,6 %)
+  kvGen: 0.146, kvErm: 0.140, pv: 0.036, pvKinderlos: 0.006,
   halteBis: 2031,                            // Ende der Haltelinie 48 %, danach Rentendämpfung
   rentenAlter: 67,
 };
@@ -18,6 +22,9 @@ function idxVal(table, year, growth) { // Wert aus Tabelle, danach mit growth fo
   const { y: base, v } = lawPick(table, year);
   return v * Math.pow(1 + growth, Math.max(0, year - base));
 }
+// Höchstbetrag Altersvorsorgeaufwendungen je Person = Höchstbeitrag zur knappschaftlichen RV (§ 10 Abs. 3 S. 1 EStG)
+const hbFor = L => Math.ceil(L.bbgKn * (L.rvSatz + SV.knAufschlag));
+const hbYear = y => hbFor({ bbgKn: idxVal(SV.bbgKn, y, 0), rvSatz: lawPick(SV.rvSatz, y).v }); // Anzeige: Tabellenwerte ohne Fortschreibung
 
 // Rentenwert ab 1.7. des Jahres y: Tabelle, danach Anpassung = Lohnwachstum, nach der Haltelinie gedämpft
 function rwJul(y, A) {
@@ -42,7 +49,7 @@ function lawYear(year, A, priceIdx) {
     soliFG: LAW.soli.freigrenzeSplit * (A.indexTariff ? Math.max(1, Math.pow(1 + A.inflation, year - 2026)) : 1),
     kfb: kd.kfb * kIdx, kg: kd.kg * kIdx * 12,
     anPausch: lawPick(LAW.pausch.anPausch, year, A.useDraft).v * kIdx,
-    bbgRV: idxVal(SV.bbgRV, year, w), bbgKV: idxVal(SV.bbgKV, year, w), de: idxVal(SV.de, year, w),
+    bbgRV: idxVal(SV.bbgRV, year, w), bbgKn: idxVal(SV.bbgKn, year, w), rvSatz: lawPick(SV.rvSatz, year).v, bbgKV: idxVal(SV.bbgKV, year, w), de: idxVal(SV.de, year, w),
     bez: idxVal(SV.bez, year, w),
     zus: A.zusatz + A.zusatzDrift * Math.max(0, year - 2026),
     pv: SV.pv + A.pvDrift * Math.max(0, year - 2026),
@@ -231,10 +238,11 @@ function simulate(I, A, opt) {
       const w = work[i]; if (w.m <= 0) return;
       const bbgKV = L.bbgKV * w.m / 12, bbgRV = L.bbgRV * w.m / 12;
       if (p.job === 'employee') {
-        if (p.rvPflicht) vorsorge += SV.rvAN * Math.min(w.g, bbgRV);
+        if (p.rvPflicht) vorsorge += L.rvSatz / 2 * Math.min(w.g, bbgRV);
         vorsorge += ((SV.kvGen + L.zus) / 2 * (p.krankengeld ? 1 - SV.kgAbzug : 1) + L.pv / 2 + pvZu) * Math.min(w.g, bbgKV);
       } else {
         const rate = p.krankengeld ? SV.kvGen : SV.kvErm;
+        if (p.rvPflicht) vorsorge += L.rvSatz * Math.min(w.g, bbgRV);   // Pflichtversicherte Selbständige tragen den vollen Beitrag
         vorsorge += ((rate + L.zus) * (p.krankengeld ? 1 - SV.kgAbzug : 1) + L.pv + pvZu) * Math.min(w.g, bbgKV);
       }
     });
@@ -322,10 +330,10 @@ function simulate(I, A, opt) {
         if (q.s.lump > 0) { lumps.push({ i, k, amt: q.s.lump, gain: q.s.gain, half: q.half, m: mG }); kvLump[i].push({ amt: q.s.lump, from: q.s0 }); }
       }
     }));
-    // Höchstbetrag für Basisrente: gemeinsamer Höchstbetrag minus Arbeitnehmer- und Arbeitgeberbeitrag zur gesetzlichen RV
-    const grvBeitr = sum(persons.map((p, i) => p.job === 'employee' && p.rvPflicht && work[i].m > 0 ? 2 * SV.rvAN * Math.min(work[i].g, L.bbgRV * work[i].m / 12) : 0));
+    // Höchstbetrag für Basisrente: gemeinsamer Höchstbetrag minus Beiträge zur gesetzlichen RV (Angestellte AN- plus AG-Anteil, Selbständige ihr voller Beitrag)
+    const grvBeitr = sum(persons.map((p, i) => p.rvPflicht && work[i].m > 0 ? L.rvSatz * Math.min(work[i].g, L.bbgRV * work[i].m / 12) : 0));
     const basisPaid = sum(polIn.map(o => o.basis.c + o.basis.z));
-    const basisDed = Math.min(basisPaid, Math.max(0, persons.length * idxVal(INS.hb, year, A.wageGrowth) - grvBeitr));
+    const basisDed = Math.min(basisPaid, Math.max(0, persons.length * hbFor(L) - grvBeitr));
 
     // ── Steuer Erwerbsphase / Grundlage zvE ohne Kapital ──
     const zvEBase = persons.reduce((s, p, i) => s + earnedTaxable(p, work[i], L, true), 0);
@@ -575,7 +583,7 @@ function simulate(I, A, opt) {
       grvW, avdPayW: avdW, estW: (ev.it.est + ev.it.soli) * wT, kapTaxW: ev.kt.taxW, kvW: sum(ev.kvR.per.map((c, i) => c * kvShare[i])),
       est: ev.it.est, soli: ev.it.soli, kapTax: ev.kt.tax,
       kv: ev.kvR.tot, net: inWithdraw ? netIncome : 0,
-      ep: [...ep], funds: depot.funds.map(fundValue), pp,
+      basisDed, ep: [...ep], funds: depot.funds.map(fundValue), pp,
     });
     if (row) rows.push(row);
   }

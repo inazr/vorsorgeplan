@@ -86,11 +86,12 @@ Gerechnet wird monatsgenau für einen Haushalt mit zwei Personen, von heute bis 
 |---|---|---|
 | Einkommensteuer | Tarif 2026, Entwurf 2027/2028, danach mit Inflation fortgeschrieben (abschaltbar) | Gesetz / Entwurf / Annahme |
 | Altersvorsorgedepot | Altersvorsorgereformgesetz, BGBl. 2026 I Nr. 156, ab 01.01.2027 | Gesetz |
-| Basisrente | Höchstbetrag 30.826 € (2026), 32.308 € (2027 nach Kabinettsbeschluss), danach mit Lohnentwicklung | Gesetz / Entwurf / Annahme |
+| Basisrente | Höchstbetrag = Höchstbeitrag zur knappschaftlichen RV (BBG knappschaftlich × (RV-Satz + 6,1 Pp.)): 30.826 € (2026), 32.308 € (2027 nach Kabinettsbeschluss, BBG 130.800 €), danach BBG mit Lohnentwicklung. Abzüglich der GRV-Beiträge, bei RV-pflichtigen Selbständigen der volle Beitrag | Gesetz / Entwurf / Annahme |
 | Private Rentenversicherung | Ertragsanteil, Hälftelung ab 62 nach 12 Jahren, 15 % Teilfreistellung | Gesetz |
 | Rentenbesteuerung | Besteuerungsanteil nach Wachstumschancengesetz | Gesetz |
 | Kapitalerträge | Abgeltungsteuer, Teilfreistellung, Vorabpauschale mit Basiszins 3,20 % (2026) | Gesetz |
 | Gesetzliche Rente | Rentenwert 42,52 € ab 01.07.2026, BBG 2026 101.400 €, Haltelinie bis 2031, danach Dämpfung (einstellbar) | Gesetz / Annahme |
+| Gesetzliche Rente, Beitragssatz | 18,6 % (2026, 2027 laut Kabinettsbeschluss), 19,9 % ab 2028 laut Vorausschätzung der DRV (11.6.2026), danach konstant | Gesetz / Entwurf / Annahme |
 | Gesetzliche Rente, SV-Werte 2027 | BBG, Durchschnittsentgelt, Bezugsgröße nach Kabinettsbeschluss vom 7.10.2026, Bundesrat ausstehend | Entwurf |
 | Krankenversicherung | BBG 2026 69.750 €, Zusatzbeitrag 2,9 % mit einstellbarem Anstieg | Gesetz / Annahme |
 | Krankenversicherung 2027 | BBG 76.500 € (inkl. Sonderanhebung), Kabinett 7.10.2026, Bundesrat ausstehend | Entwurf |
@@ -99,7 +100,7 @@ Annahmen der Rechnung:
 - Steuern und Sozialversicherung werden jährlich berechnet, alle Zeitpunkte (Rentenbeginn, Sparende, Auszahlungen, Kinder) monatsgenau. In angebrochenen Jahren werden Rente, Steuer und Beiträge anteilig auf die Entnahmemonate verteilt.
 - Die Steuer auf Ausschüttungen und Vorabpauschale wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a) fließen ins ETF-Depot.
 - Auszahlungen aus dem Altersvorsorgedepot vor dem Entnahmestart werden nach pauschal 30 % Steuer und Beiträgen ins ETF-Depot reinvestiert.
-- Der Sparerpauschbetrag wird nur in Höhe des eingegebenen Freistellungsauftrags berücksichtigt.
+- Beim ETF-Depot wird der Sparerpauschbetrag nur in Höhe des eingegebenen Freistellungsauftrags berücksichtigt. Eine Kapitalauszahlung der privaten Rentenversicherung ohne Hälftelung erhält den im Jahr noch freien Rest bis 2.000 €.
 - Übersteigen die Beiträge zu den Vorsorgeprodukten das Budget nach Kreditraten, werden sie in diesem Jahr anteilig gekürzt.
 - Renten aus Basisrente und privater Rentenversicherung laufen bis zum Zielalter. Dass sie lebenslang gezahlt werden und das Kapital ab Rentenbeginn nicht vererbbar ist, bewertet der Rechner nicht. Bis zum Rentenbeginn zählt das Versicherungskapital zum Vermögen.
 - Die Steuer auf eine Kapitalauszahlung der privaten Rentenversicherung wird aus der Auszahlung bezahlt, der Rest fließt ins ETF-Depot.
