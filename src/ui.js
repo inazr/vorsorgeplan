@@ -509,7 +509,7 @@ function legalTable() {
     ['Rentenversicherung', `Beitragssatz ${rs(2026)} (2026)`, 'G', '§ 158 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__158.html'],
     ['Rentenversicherung', `Beitragssatz 2027 ${rs(2027)}`, 'E', 'SV-Rechengrößen 2027 (Kabinett 7.10.2026)', ''],
     ['Rentenversicherung', `Beitragssatz ab 2028 ${rs(2028)} (Vorausschätzung)`, 'A', 'DRV, Bundesvertreterversammlung 11.6.2026', 'https://www.deutsche-rentenversicherung.de/DRV/DE/Ueber-uns-und-Presse/Presse/Pressemitteilungen/Pressemitteilungen-aktuell/2026/2026-06-11-bvv-gunkel.html'],
-    ['Rentenversicherung', 'Haltelinie 48 % bis 2031, danach Dämpfung (Schalter)', 'G', 'Rentenpaket 2025', ''],
+    ['Rentenversicherung', `Haltelinie 48 % bis ${SV.halteBis}, danach Dämpfung (Schalter)`, 'G', 'Rentenpaket 2025', ''],
     ['Rentenversicherung', `Regelaltersgrenze ${SV.rentenAlter}, Abschlag 0,3 % je Monat`, 'G', '§§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__77.html'],
     ['Krankenversicherung', `BBG 2026 ${eur(lawPick(SV.bbgKV, 2026).v)}, Zusatzbeitrag Ø ${pc(ASSUME.zusatz)}`, 'G', 'SGB V, BStabG', ''],
     ['Krankenversicherung', `BBG 2027 ${eur(lawPick(SV.bbgKV, 2027).v)} (inkl. Sonderanhebung)`, 'E', 'SV-Rechengrößenverordnung 2027 (Kabinett 7.10.2026)', ''],
@@ -571,7 +571,7 @@ function renderP1() {
         ${F('A.ret', 'Rendite Aktien pro Jahr', { t: 'pct', h: 'Vor Fondskosten. Gilt als typischer Verlauf (Median).' })}
         ${F('A.inflation', 'Inflation', { t: 'pct' })}
         ${F('A.wageGrowth', 'Lohnwachstum', { t: 'pct', h: 'Treibt Rentenwert, BBG und Durchschnittsentgelt' })}
-        ${F('A.rentenDaempfung', 'Rentendämpfung ab 2032', { t: 'pct', step: 0.05, h: 'Rentenanpassung = Lohnwachstum minus Dämpfung' })}
+        ${F('A.rentenDaempfung', `Rentendämpfung ab ${SV.halteBis + 1}`, { t: 'pct', step: 0.05, h: 'Rentenanpassung = Lohnwachstum minus Dämpfung' })}
         ${F('A.basiszins', 'Basiszins ab 2027', { t: 'pct', step: 0.05 })}
         ${F('A.zusatz', 'KV-Zusatzbeitrag 2026', { t: 'pct', step: 0.05 })}
         ${F('A.zusatzDrift', 'Zusatzbeitrag steigt pro Jahr um', { t: 'pct', step: 0.01, u: 'Pp.' })}

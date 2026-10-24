@@ -12,12 +12,13 @@ const SV = { // Sozialversicherung, Basisjahr 2026 (G), Fortschreibung mit Lohne
   // Beitragssatz allgemeine RV (§ 158 SGB VI); 2027 Kabinett 7.10.2026, 2028 Vorausschätzung DRV (Bundesvertreterversammlung 11.6.2026)
   rvSatz: { 2026: 0.186, 2027: { v: 0.186, st: 'E' }, 2028: { v: 0.199, st: 'A' } },
   bbgKn: { 2026: 124800, 2027: { v: 130800, st: 'E' } },     // BBG knappschaftliche RV
-  knAufschlag: 0.061,                        // Satz knappschaftliche RV minus allgemeiner Satz (24,7 % − 18,6 %)
+  knAufschlag: 0.061,                        // Annahme (A): Abstand Satz knappschaftliche RV zu allgemeinem Satz (24,7 % − 18,6 %), konstant fortgeschrieben
   kvGen: 0.146, kvErm: 0.140, pv: 0.036, pvKinderlos: 0.006,
   halteBis: 2031,                            // Ende der Haltelinie 48 %, danach Rentendämpfung
   rentenAlter: 67,
 };
 
+// Hinweis: SV-Tabellen ignorieren den Entwurfsschalter A.useDraft; SV-Werte mit Status E gelten immer (der Schalter betrifft nur Steuertarif und Kinderwerte)
 function idxVal(table, year, growth) { // Wert aus Tabelle, danach mit growth fortgeschrieben
   const { y: base, v } = lawPick(table, year);
   return v * Math.pow(1 + growth, Math.max(0, year - base));
@@ -29,7 +30,7 @@ const hbYear = y => hbFor({ bbgKn: idxVal(SV.bbgKn, y, 0), rvSatz: lawPick(SV.rv
 // Rentenwert ab 1.7. des Jahres y: Tabelle, danach Anpassung = Lohnwachstum, nach der Haltelinie gedämpft
 function rwJul(y, A) {
   const ys = Object.keys(SV.rw).map(Number), last = Math.max(...ys);
-  if (y <= last) return SV.rw[ys.includes(y) ? y : Math.min(...ys)]; // vor der Tabelle: erster Eintrag
+  if (y <= last) return SV.rw[Math.max(...ys.filter(k => k <= y), Math.min(...ys))]; // in der Tabelle: letzter Eintrag ≤ y, davor der erste
   let rw = SV.rw[last];
   for (let k = last + 1; k <= y; k++) rw *= 1 + A.wageGrowth - (k > SV.halteBis ? A.rentenDaempfung : 0);
   return rw;

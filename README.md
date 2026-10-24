@@ -132,6 +132,7 @@ Aufbau:
 | `src/depot.js` | ETF-Depot mit Tranchen und Altersvorsorgedepot |
 | `src/insurance.js` | Basisrente und private Rentenversicherung: Kosten, Verrentung, Ertragsanteil, Effektivkosten |
 | `src/loans.js` | Annuitätendarlehen |
+| `src/state.js` | Zustands-Helfer: clone, esc, deepMerge, conform/ENUMS, loadState |
 | `src/sim.js` | Simulation in Jahresschritten mit monatsgenauen Zeitpunkten, Sozialversicherung, gesetzliche Rente |
 | `src/analysis.js` | Maximales Netto (auch ewige Rente), Perzentil-Netto, Optimierer, Monte Carlo, Break-even |
 | `src/defaults.js` | Beispielhaushalt und Annahmen |

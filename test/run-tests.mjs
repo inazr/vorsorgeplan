@@ -131,7 +131,7 @@ check('Basisrente: Rente aus Rentenfaktor', near(v.payY, v.rentM * 12 * (1 - v.r
 check('Private RV: Teilkapital 50 %', v.lump > 0 && v.gain > 0 && v.half, JSON.stringify(v));
 check('Private RV: Hälftelung günstiger als Abgeltung', v.lumpTax < v.gain * 0.85 * 0.26375, `${v.lumpTax} / ${v.gain}`);
 // Im Standardfall verbraucht das Depot in diesem Jahr den ganzen Sparerpauschbetrag (pbRest = 0), sonst steht der Rest der Auszahlung zu
-check('Private RV: ohne Hälftelung Abgeltungsteuer (pbRest 0)', !v.halfJ && near(v.lumpTaxJ, Math.max(0, v.gainJ * 0.85 - 0) * 0.25 * 1.055, 1), `${v.lumpTaxJ} / ${v.gainJ}`);
+check('Private RV: ohne Hälftelung Abgeltungsteuer (pbRest 0)', !v.halfJ && near(v.lumpTaxJ, Math.max(0, v.gainJ * 0.85) * 0.25 * 1.055, 1), `${v.lumpTaxJ} / ${v.gainJ}`);
 check('Private RV: ohne Hälftelung Sparerpauschbetrag (prvKapital61)', !v.halfJ0 && near(v.lumpTaxJ0, Math.max(0, v.gainJ0 * 0.85 - g('LAW.sparerPB')) * 0.25 * 1.055, 1), `${v.lumpTaxJ0} / ${v.gainJ0}`);
 
 // 9. Beiträge über dem Budget werden gekürzt, das ETF-Depot bekommt dann nichts aus dem Budget
@@ -343,14 +343,14 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
 
 // 23. RV-Satz jahresweise, Höchstbetrag aus knappschaftlicher BBG (§ 10 Abs. 3 S. 1 EStG), RV-pflichtige Selbständige
 {
-  const hb = y => g(`typeof hbFor === 'function' ? hbFor(lawYear(${y}, ASSUME, 1)) : NaN`), hy = y => g(`typeof hbYear === 'function' ? hbYear(${y}) : NaN`);
+  const hb = y => g(`hbFor(lawYear(${y}, ASSUME, 1))`), hy = y => g(`hbYear(${y})`);
   check('hbFor 2026', hb(2026) === 30826, hb(2026));
   check('hbFor 2027', hb(2027) === 32308, hb(2027));
   check('hbYear wie hbFor', hy(2026) === 30826 && hy(2027) === 32308, `${hy(2026)} / ${hy(2027)}`);
   // Person 1 selbständig (40.000 €), Person 2 angestellt (60.000 €), je 30.000 € Basisrente: der Höchstbetrag bindet
   const rv = g(`(() => { const f = x => { const { I, A } = mk((I, A) => { I.budget.monthly = 6000; I.persons.forEach(p => { p.basis.on = true; p.basis.beitrag = 30000; }); ${T}.job = 'self'; ${T}.rvPflicht = x; });
       return simulate(I, A, { scenario: 'B', targetReal: 1000, detail: true }).rows[0]; };
-    const a = f(true), b = f(false), L = lawYear(a.year, ASSUME, 1), hb = typeof hbFor === 'function' ? hbFor(L) : NaN, rs = L.rvSatz ?? 0.186;
+    const a = f(true), b = f(false), L = lawYear(a.year, ASSUME, 1), hb = hbFor(L), rs = L.rvSatz;
     return { estA: a.est, estB: b.est, dedA: a.basisDed, dedB: b.basisDed, hb, rs, bbg: L.bbgRV }; })()`);
   check('selfRv: höherer Vorsorgeabzug, weniger Einkommensteuer', rv.estA < rv.estB - 1000, `${rv.estA} / ${rv.estB}`);
   check('self: Höchstbetrag minus AN- und AG-Beitrag von Person 2', near(rv.dedB, 2 * rv.hb - rv.rs * Math.min(60000, rv.bbg), 0.01), `${rv.dedB}`);
