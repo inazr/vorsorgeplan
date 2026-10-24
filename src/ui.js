@@ -279,6 +279,10 @@ function renderP0() {
 
 function renderFacts() {
   const I = ST.I;
+  factsPersons(I); factsLoans(I); factsLoanInfo(I); factsAvd(I); factsPolicies(I); factsBudget(I); factsFunds(I); factsRefund();
+}
+// Rentenfakten je Person (Reiter Haushalt)
+function factsPersons(I) {
   I.persons.forEach((P, i) => {
     const el = $('#facts-' + i); if (!el) return;
     const rs = retireStartAbs(P), y = Math.floor(rs / 12), m = rs % 12;
@@ -302,6 +306,9 @@ function renderFacts() {
         ? `<span class="pill good">KVdR · keine Beiträge auf Depot-Erträge</span>`
         : `<span class="pill warn">Freiwillig · Beiträge auch auf Kapitalerträge und Altersvorsorgedepot</span>`}${kv.auto ? ` <span class="muted" style="font-family:var(--font-ui);font-size:11px">9/10-Regel: ${kv.have.toFixed(1)} von nötigen ${kv.need.toFixed(1)} Jahren</span>` : ''}</div></div>`;
   });
+}
+// Kreditfakten je Darlehen
+function factsLoans(I) {
   const now = new Date(), todayAbs = now.getFullYear() * 12 + now.getMonth();
   I.loans.forEach((c, k) => {
     const el = $('#loanfacts-' + k); if (!el) return;
@@ -314,15 +321,17 @@ function renderFacts() {
       ['Zinsen gesamt', eur(pv.interestTotal)],
     ].map(([l, v]) => fact(l, v)).join('');
   });
-  const li = $('#loan-info');
-  if (li) {
-    const hs = R.simB.houseSale;
-    const first = R.simB.rows[0];
-    li.innerHTML = !I.loans.length ? 'Kein Kredit eingetragen. Das ganze Budget fließt in die Sparpläne.' : `Kreditraten ${first.year}: <b class="num">${eur(first.loanPay / 12)}</b> pro Monat. Der Rest des Budgets fließt in die Sparpläne.`
-      + (hs ? ` Ablösung ${hs.year}: <b class="num">${eur(hs.payoff)}</b> Restschuld, dafür werden <b class="num">${eur(hs.gross)}</b> aus dem ETF-Depot verkauft, davon <b class="num">${eur(hs.tax)}</b> Kapitalertragsteuer.`
-        + (hs.covered < hs.payoff - 1 ? ` <span class="pill warn">Depot reicht nicht</span> Die restlichen <b class="num">${eur(hs.payoff - hs.covered)}</b> laufen als Anschlussfinanzierung weiter.` : '') : '');
-  }
-  // Fakten Strategie-Reiter
+}
+function factsLoanInfo(I) {
+  const li = $('#loan-info'); if (!li) return;
+  const hs = R.simB.houseSale;
+  const first = R.simB.rows[0];
+  li.innerHTML = !I.loans.length ? 'Kein Kredit eingetragen. Das ganze Budget fließt in die Sparpläne.' : `Kreditraten ${first.year}: <b class="num">${eur(first.loanPay / 12)}</b> pro Monat. Der Rest des Budgets fließt in die Sparpläne.`
+    + (hs ? ` Ablösung ${hs.year}: <b class="num">${eur(hs.payoff)}</b> Restschuld, dafür werden <b class="num">${eur(hs.gross)}</b> aus dem ETF-Depot verkauft, davon <b class="num">${eur(hs.tax)}</b> Kapitalertragsteuer.`
+      + (hs.covered < hs.payoff - 1 ? ` <span class="pill warn">Depot reicht nicht</span> Die restlichen <b class="num">${eur(hs.payoff - hs.covered)}</b> laufen als Anschlussfinanzierung weiter.` : '') : '');
+}
+// Fakten Strategie-Reiter: AVD je Person
+function factsAvd(I) {
   I.persons.forEach((P, i) => {
     const el = $('#avdfacts-' + i); if (!el) return;
     const a = P.avd;
@@ -339,7 +348,9 @@ function renderFacts() {
       ['Erste Auszahlung', startRow ? eur(startRow.avdPay[i] / 12 / startRow.priceIdx) + '/M.' : '–'],
     ].map(([l, v]) => fact(l, v)).join('');
   });
-  // Basisrente und private RV
+}
+// Basisrente und private RV
+function factsPolicies(I) {
   I.persons.forEach((P, i) => POLICIES.forEach(k => {
     const el = $(`#${k}facts-${i}`); if (!el) return;
     const st = R.simB.pol[i][k], cfg = P[k];
@@ -363,33 +374,33 @@ function renderFacts() {
     if (d.rentTax === 'ertragsanteil' && teil < 1) items.push(['Ertragsanteil der Rente', pc(ertragsanteil(cfg.payStart), 0)]);
     el.innerHTML = items.map(([l, v]) => fact(l, v)).join('');
   }));
-  // Budgetübersicht im ersten Rechenjahr
-  const bt = $('#budget-tbl');
-  if (bt) {
-    const r = R.simB.rows[0], A0 = R.simA.rows[0];
-    const n = I.persons.length;
-    const per = (who, key) => who < 0 ? sum(I.persons.map((p, i) => r.pp[i][key] || 0)) : r.pp[who][key] || 0;
-    const lines = [
-      ...PK.map(k => [PROD[k].name + (k === 'avd' ? ' (Eigenbeitrag)' : ''), w => per(w, k + 'In')]),
-      ['ETF-Depot (Rest)', w => w < 0 ? r.etfContrib : r.etfContrib / n],
-      ['Kreditraten', w => w < 0 ? r.loanPay : r.loanPay / n],
-    ];
-    const cols = [...I.persons.map((p, i) => i), -1];
-    $('#budget-sub').textContent = `${r.year} · pro Monat · nominal`;
-    bt.innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(I.persons[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f]) => `<tr><td class="txt">${l}</td>${cols.map(c => `<td>${eur(f(c) / 12)}</td>`).join('')}</tr>`).join('')}
+}
+// Budgetübersicht im ersten Rechenjahr
+function factsBudget(I) {
+  const bt = $('#budget-tbl'); if (!bt) return;
+  const r = R.simB.rows[0];
+  const n = I.persons.length;
+  const per = (who, key) => who < 0 ? sum(I.persons.map((p, i) => r.pp[i][key] || 0)) : r.pp[who][key] || 0;
+  const lines = [
+    ...PK.map(k => [PROD[k].name + (k === 'avd' ? ' (Eigenbeitrag)' : ''), w => per(w, k + 'In')]),
+    ['ETF-Depot (Rest)', w => w < 0 ? r.etfContrib : r.etfContrib / n],
+    ['Kreditraten', w => w < 0 ? r.loanPay : r.loanPay / n],
+  ];
+  const cols = [...I.persons.map((p, i) => i), -1];
+  $('#budget-sub').textContent = `${r.year} · pro Monat · nominal`;
+  bt.innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(I.persons[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f]) => `<tr><td class="txt">${l}</td>${cols.map(c => `<td>${eur(f(c) / 12)}</td>`).join('')}</tr>`).join('')}
       <tr style="border-top:2px solid var(--line-2)"><td class="txt"><b>Budget</b></td>${cols.map(c => `<td><b>${eur((c < 0 ? r.budget : r.budget / n) / 12)}</b></td>`).join('')}</tr></tbody></table>`
-      + (R.simB.rows.some(x => x.budgetCut < 0.999) ? `<p class="note" style="margin:8px"><span class="pill warn">Budget reicht nicht</span> Die Beiträge der Vorsorgeprodukte sind höher als das Budget nach Kreditraten. In diesen Jahren werden alle Beiträge anteilig gekürzt.</p>` : '');
-  }
-  const fi = $('#fund-issues');
-  if (fi) {
-    const iss = fundIssues(I);
-    fi.innerHTML = iss.length ? `<div class="note" style="background:var(--warn-soft)"><span class="pill warn">Zeiträume prüfen</span><ul style="margin:6px 0 0 18px;padding:0">${iss.map(x => `<li>${x}</li>`).join('')}</ul></div>` : '';
-  }
-  const rf = $('#refund-info');
-  if (rf) {
-    const sv = R.simB;
-    rf.innerHTML = `Bis zum Rentenbeginn bekommt ihr <b class="num">${keur(sv.sumZulagen)}</b> Zulagen und <b class="num">${keur(sv.sumRefunds)}</b> zusätzliche Steuererstattung aus dem Sonderausgabenabzug (nominal). Die Erstattung kommt im Folgejahr und fließt wie in der Karte eingestellt. Kapital in heutiger Kaufkraft.`;
-  }
+    + (R.simB.rows.some(x => x.budgetCut < 0.999) ? `<p class="note" style="margin:8px"><span class="pill warn">Budget reicht nicht</span> Die Beiträge der Vorsorgeprodukte sind höher als das Budget nach Kreditraten. In diesen Jahren werden alle Beiträge anteilig gekürzt.</p>` : '');
+}
+function factsFunds(I) {
+  const fi = $('#fund-issues'); if (!fi) return;
+  const iss = fundIssues(I);
+  fi.innerHTML = iss.length ? `<div class="note" style="background:var(--warn-soft)"><span class="pill warn">Zeiträume prüfen</span><ul style="margin:6px 0 0 18px;padding:0">${iss.map(x => `<li>${x}</li>`).join('')}</ul></div>` : '';
+}
+function factsRefund() {
+  const rf = $('#refund-info'); if (!rf) return;
+  const sv = R.simB;
+  rf.innerHTML = `Bis zum Rentenbeginn bekommt ihr <b class="num">${keur(sv.sumZulagen)}</b> Zulagen und <b class="num">${keur(sv.sumRefunds)}</b> zusätzliche Steuererstattung aus dem Sonderausgabenabzug (nominal). Die Erstattung kommt im Folgejahr und fließt wie in der Karte eingestellt. Kapital in heutiger Kaufkraft.`;
 }
 
 // ═══ Reiter 2: Strategie ═══
@@ -771,122 +782,134 @@ function renderWho(sim) {
   $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal`;
   $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(P[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, sub]) => `<tr${sub ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
-function renderCharts() {
-  if (!R) return;
+// Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
+const area = (name, data, color, stack) => ({ name, type: 'line', stack, symbol: 'none', data, lineStyle: { width: 1, color }, itemStyle: { color }, areaStyle: { color, opacity: 0.25 } });
+const total = (name, data, ink, extra = {}) => ({ name, type: 'line', symbol: 'none', data, lineStyle: { width: 2, color: ink }, itemStyle: { color: ink }, ...extra });
+const wLine = ws => ({ markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } });
+const bar = (name, data, color, surf, stack = 's') => ({ name, type: 'bar', stack, data, itemStyle: { color, borderColor: surf, borderWidth: 1, borderRadius: 0 }, barMaxWidth: 18, emphasis: { focus: 'series' } });
+const on = (sim, k) => sim.rows.some(r => V(r, k) > 0);   // Serie nur zeigen, wenn das Produkt genutzt wird
+// Gemeinsamer Kontext eines Chart-Durchlaufs: Szenario, Farben (zur Renderzeit gelesen, wegen Theme), Achsen
+function chartCtx() {
   if (chartScen === 'O' && !R.simO) chartScen = 'B';
-  const sim = simOf(chartScen), others = ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k));
-  const C1 = cssv('--s1'), C3 = cssv('--s3'), C5 = cssv('--s5'), C6 = cssv('--s6'), C8 = cssv('--s8'), CA = cssv('--sA'), ink = cssv('--ink'), surf = cssv('--surface');
-  const years = sim.rows.map(r => r.year);
-  // Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
-  const area = (name, data, color, stack) => ({ name, type: 'line', stack, symbol: 'none', data, lineStyle: { width: 1, color }, itemStyle: { color }, areaStyle: { color, opacity: 0.25 } });
-  const total = (name, data, extra = {}) => ({ name, type: 'line', symbol: 'none', data, lineStyle: { width: 2, color: ink }, itemStyle: { color: ink }, ...extra });
-  const wLine = ws => ({ markLine: { symbol: 'none', silent: true, data: [{ xAxis: String(ws) }], lineStyle: { color: cssv('--ink-3'), type: [2, 3] }, label: { formatter: 'Entnahme', color: cssv('--ink-2'), position: 'end' } } });
+  const sim = simOf(chartScen);
   // Feste Farben in allen Charts: gesetzliche Rente C1, ETF C3, Produkte aus PROD (AVD C2, Basisrente C7, private RV C4).
   // Reihenfolgen stehen in ORDER_WEALTH, ORDER_SAVE und ORDER_INCOME.
-  const PC = { grv: C1, etf: C3, ...Object.fromEntries(PK.map(k => [k, cssv(PROD[k].color)])) };
-  const on = k => sim.rows.some(r => V(r, k) > 0);   // Serie nur zeigen, wenn das Produkt genutzt wird
-  const scC = k => cssv(SCN_C[k]);
-  const bar = (name, data, color, stack = 's') => ({ name, type: 'bar', stack, data, itemStyle: { color, borderColor: surf, borderWidth: 1, borderRadius: 0 }, barMaxWidth: 18, emphasis: { focus: 'series' } });
-  const ws = sim.wStartYear;
-  const who = chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt';
-  $('#wealth-sub').textContent = `${who} · Entnahme ab ${ws} · ${realLabel()}`;
-  renderWho(sim);
-
-  // Vermögen
+  const col = Object.fromEntries(['--s1', '--s3', '--s5', '--s6', '--s8', '--sA', '--ink', '--surface'].map(n => [n, cssv(n)]));
+  const PC = { grv: col['--s1'], etf: col['--s3'], ...Object.fromEntries(PK.map(k => [k, cssv(PROD[k].color)])) };
+  const er = sim.rows.filter(r => r.wMonths > 0);   // Monatswerte der Entnahmemonate; angebrochene Jahre sind an der Achse markiert
+  return {
+    sim, PC, er, others: ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k)),
+    C1: col['--s1'], C3: col['--s3'], C5: col['--s5'], C6: col['--s6'], C8: col['--s8'], CA: col['--sA'], ink: col['--ink'], surf: col['--surface'],
+    years: sim.rows.map(r => r.year), ws: sim.wStartYear,
+    who: chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt',
+    scC: k => cssv(SCN_C[k]),
+    m: (r, v) => dv(r, v) / r.wMonths,
+    wYear: r => r.wMonths < 12 ? `${r.year} (${r.wMonths} Mon.)` : r.year,
+  };
+}
+function chartWealth(c) {
+  const { sim, PC, others, scC } = c;
   chartOf('ch-wealth').setOption(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: years },
+    xAxis: { ...baseOpt().xAxis, data: c.years },
     series: [
       ...ORDER_WEALTH.flatMap(k => k === 'etf' ? [area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), PC.etf, 'w')]
-        : on(k) ? [area(PROD[k].chart, sim.rows.map(r => dv(r, V(r, k))), PC[k], 'w')] : []),
-      ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), C8, 'd')] : []),
-      total('Nettovermögen', sim.rows.map(r => dv(r, V(r, 'netWorth'))), wLine(ws)),
+        : on(sim, k) ? [area(PROD[k].chart, sim.rows.map(r => dv(r, V(r, k))), PC[k], 'w')] : []),
+      ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), c.C8, 'd')] : []),
+      total('Nettovermögen', sim.rows.map(r => dv(r, V(r, 'netWorth'))), c.ink, wLine(c.ws)),
       ...others.map(k => ({ name: 'Nettovermögen ' + SCN[k], type: 'line', symbol: 'none', data: simOf(k).rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: scC(k) }, itemStyle: { color: scC(k) } })),
     ],
   }), true);
-
-  // Kapital je ETF-Sparplan
+}
+// Kapital je ETF-Sparplan
+function chartFunds(c) {
+  const { sim } = c;
   const FC = FUND_C.map(cssv);
   const share = chartPerson >= 0 ? 1 / ST.I.persons.length : 1;
   const fundsCfg = ST.I.depot.funds;
-  $('#funds-sub').textContent = `${who} · ${chartPerson >= 0 ? 'Hälfte des gemeinsamen Depots · ' : ''}${realLabel()}`;
+  $('#funds-sub').textContent = `${c.who} · ${chartPerson >= 0 ? 'Hälfte des gemeinsamen Depots · ' : ''}${realLabel()}`;
   chartOf('ch-funds').setOption(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: years },
+    xAxis: { ...baseOpt().xAxis, data: c.years },
     tooltip: { ...baseOpt().tooltip, formatter: ps => {
       const vis = ps.filter(p => p.seriesIndex < fundsCfg.length && p.value > 0.5);
       const tot = vis.reduce((a, p) => a + p.value, 0);
       return vis.length ? tip(ps[0].axisValue, [...tipSeries(vis), tipRow('Summe', tot, true)]) : `<b>${ps[0].axisValue}</b><br>Depot leer`;
     } },
     series: [...fundsCfg.map((f, k) => area(f.name, sim.rows.map(r => dv(r, (r.funds[k] || 0) * share)), FC[k], 'f')),
-      total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), wLine(ws))],
+      total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), c.ink, wLine(c.ws))],
   }), true);
-
-  // Vorsorgeprodukte: Kapital je Person (Flächen) und Einzahlungen (Linie)
-  {
-    const P = ST.I.persons, PPC = [cssv('--s1'), cssv('--s2')];
-    const k = chartScen === 'A' ? 'B' : chartScen, avdSim = simOf(k);   // nur ETF hat keine Vorsorgeprodukte
-    const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
-    $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${realLabel()}`;
-    let cum = 0;
-    const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => PK.reduce((b, k) => b + r.pp[i][k + 'In'] + (k === 'avd' ? r.pp[i].zul : 0), a), 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
-    chartOf('ch-avd').setOption(baseOpt({
-      xAxis: { ...baseOpt().xAxis, data: avdSim.rows.map(r => r.year) },
-      series: [
-        ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, PK.reduce((b, k) => b + r[k][i], 0))), PPC[i], 'a')),
-        { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(avdSim.wStartYear) },
-      ],
-    }), true);
-  }
-
-  // Sparen
+}
+// Vorsorgeprodukte: Kapital je Person (Flächen) und Einzahlungen (Linie)
+function chartProducts() {
+  const P = ST.I.persons, PPC = [cssv('--s1'), cssv('--s2')];
+  const k = chartScen === 'A' ? 'B' : chartScen, avdSim = simOf(k);   // nur ETF hat keine Vorsorgeprodukte
+  const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
+  $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${realLabel()}`;
+  let cum = 0;
+  const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => PK.reduce((b, k) => b + r.pp[i][k + 'In'] + (k === 'avd' ? r.pp[i].zul : 0), a), 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
+  chartOf('ch-avd').setOption(baseOpt({
+    xAxis: { ...baseOpt().xAxis, data: avdSim.rows.map(r => r.year) },
+    series: [
+      ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, PK.reduce((b, k) => b + r[k][i], 0))), PPC[i], 'a')),
+      { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(avdSim.wStartYear) },
+    ],
+  }), true);
+}
+function chartSave(c) {
+  const { sim, PC, surf } = c;
   const sr = sim.rows.filter(r => r.saveMonths > 0);
   chartOf('ch-save').setOption(withLegend(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: sr.map(r => r.saveMonths < 12 ? `${r.year} (${r.saveMonths} Mon.)` : r.year) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
     // Reihenfolge und Farben: Kredit C6, Sondertilgung CA, Steuern C8, private RV, ETF, Basisrente, AVD, Zulagen C1
     series: [
-      ...(on('loanPay') ? [bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), C6)] : []),
-      ...(on('loanSonder') ? [bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), CA)] : []),
-      bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), C8),
-      ...ORDER_SAVE.flatMap(k => k === 'etf' ? [bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), PC.etf)]
-        : on(k + 'In') ? [bar(PROD[k].chart, sr.map(r => dv(r, V(r, k + 'In'))), PC[k]), ...(k === 'avd' ? [bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), C1)] : [])] : []),
+      ...(on(sim, 'loanPay') ? [bar('Kreditrate', sr.map(r => dv(r, Math.min(V(r, 'loanPay') - V(r, 'loanSonder'), V(r, 'budget')))), c.C6, surf)] : []),
+      ...(on(sim, 'loanSonder') ? [bar('Sondertilgung', sr.map(r => dv(r, V(r, 'loanSonder'))), c.CA, surf)] : []),
+      bar('Steuern auf Fondserträge', sr.map(r => dv(r, V(r, 'taxFromBudget'))), c.C8, surf),
+      ...ORDER_SAVE.flatMap(k => k === 'etf' ? [bar('ETF-Sparrate', sr.map(r => dv(r, V(r, 'etfContrib') - V(r, 'avdReinvest'))), PC.etf, surf)]
+        : on(sim, k + 'In') ? [bar(PROD[k].chart, sr.map(r => dv(r, V(r, k + 'In'))), PC[k], surf), ...(k === 'avd' ? [bar('Zulagen', sr.map(r => dv(r, V(r, 'zul'))), c.C1, surf)] : [])] : []),
     ],
   })), true);
-
-  // Einkommen
-  // Monatswerte der Entnahmemonate; angebrochene Jahre sind an der Achse markiert
-  const er = sim.rows.filter(r => r.wMonths > 0);
-  const m = (r, v) => dv(r, v) / r.wMonths;
-  const wYear = r => r.wMonths < 12 ? `${r.year} (${r.wMonths} Mon.)` : r.year;
+}
+function chartIncome(c) {
+  const { sim, PC, er, m, surf, ink } = c;
   chartOf('ch-income').setOption(withLegend(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
+    xAxis: { ...baseOpt().xAxis, data: er.map(c.wYear) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => { const b = ps.filter(p => p.seriesType === 'bar'); return tip(ps[0].axisValue, [...tipSeries(b), tipSum(b), ...tipSeries(ps.filter(p => p.seriesType !== 'bar'))]); } },
     series: [
-      ...ORDER_INCOME.flatMap(k => k === 'grv' ? [bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), PC.grv)]
-        : k === 'etf' ? [bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf)]
-        : on(k + 'PayW') ? [bar(PROD[k].chart, er.map(r => m(r, V(r, k + 'PayW'))), PC[k])] : []),
+      ...ORDER_INCOME.flatMap(k => k === 'grv' ? [bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), PC.grv, surf)]
+        : k === 'etf' ? [bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf, surf)]
+        : on(sim, k + 'PayW') ? [bar(PROD[k].chart, er.map(r => m(r, V(r, k + 'PayW'))), PC[k], surf)] : []),
       { name: 'Netto', type: 'line', symbol: 'circle', symbolSize: 4, data: er.map(r => m(r, V(r, 'net'))), lineStyle: { width: 2, color: ink }, itemStyle: { color: ink } },
     ],
   })), true);
-
-  // Abzüge
+}
+function chartDeduct(c) {
+  const { er, m, surf } = c;
   chartOf('ch-deduct').setOption(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: er.map(wYear) },
+    xAxis: { ...baseOpt().xAxis, data: er.map(c.wYear) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
     series: [
-      bar('Einkommensteuer + Soli', er.map(r => m(r, V(r, 'estW'))), C5),
-      bar('Kapitalertragsteuer', er.map(r => m(r, V(r, 'kapTaxW'))), C6),
-      bar('Kranken- und Pflegeversicherung', er.map(r => m(r, V(r, 'kvW'))), CA),
+      bar('Einkommensteuer + Soli', er.map(r => m(r, V(r, 'estW'))), c.C5, surf),
+      bar('Kapitalertragsteuer', er.map(r => m(r, V(r, 'kapTaxW'))), c.C6, surf),
+      bar('Kranken- und Pflegeversicherung', er.map(r => m(r, V(r, 'kvW'))), c.CA, surf),
     ],
   }), true);
-
-  // Vergleich
+}
+function chartCompare(c) {
+  const { m, scC } = c;
   const ab = s => s.rows.filter(r => r.wMonths > 0).map(r => m(r, V(r, 'estW') + V(r, 'kapTaxW') + V(r, 'kvW')));
   chartOf('ch-compare').setOption(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: R.simA.rows.filter(r => r.wMonths > 0).map(wYear) },
+    xAxis: { ...baseOpt().xAxis, data: R.simA.rows.filter(r => r.wMonths > 0).map(c.wYear) },
     series: ['A', 'B', 'O'].filter(simOf).map(k => ({ name: SCN[k], type: 'line', symbol: 'none', data: ab(simOf(k)), lineStyle: { width: 2, color: scC(k) }, itemStyle: { color: scC(k) } })),
   }), true);
-
-  renderTable(sim);
+}
+function renderCharts() {
+  if (!R) return;
+  const c = chartCtx();
+  $('#wealth-sub').textContent = `${c.who} · Entnahme ab ${c.ws} · ${realLabel()}`;
+  renderWho(c.sim);
+  chartWealth(c); chartFunds(c); chartProducts(); chartSave(c); chartIncome(c); chartDeduct(c); chartCompare(c);
+  renderTable(c.sim);
   if (MC) renderMC();
 }
 
