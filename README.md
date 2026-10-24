@@ -19,7 +19,7 @@
 <p>
   <a href="https://github.com/inazr/vorsorgeplan/releases/latest"><img alt="Version" src="https://img.shields.io/github/v/release/inazr/vorsorgeplan?label=Version&color=1f5f8b"></a>
   <a href="https://github.com/inazr/vorsorgeplan/actions/workflows/pages.yml"><img alt="GitHub Pages" src="https://img.shields.io/github/actions/workflow/status/inazr/vorsorgeplan/pages.yml?branch=main&label=GitHub%20Pages"></a>
-  <img alt="Rechtsstand" src="https://img.shields.io/badge/Rechtsstand-23.10.2026-eda100">
+  <img alt="Stand" src="https://img.shields.io/badge/Stand-23.10.2026-eda100">
   <img alt="Offline" src="https://img.shields.io/badge/l%C3%A4uft-offline-1baf7a">
   <img alt="Keine Abhängigkeiten" src="https://img.shields.io/badge/Abh%C3%A4ngigkeiten-0-6250d6">
   <a href="LICENSE"><img alt="Lizenz MIT" src="https://img.shields.io/badge/Lizenz-MIT-6f7b87"></a>
@@ -27,7 +27,7 @@
 
 <p>
   <a href="#was-der-rechner-abbildet"><b>Funktionen</b></a> ·
-  <a href="#rechtsstand-und-annahmen"><b>Rechtsstand</b></a> ·
+  <a href="#gesetzliche-werte-und-annahmen"><b>Gesetzliche Werte</b></a> ·
   <a href="#entwicklung"><b>Entwicklung</b></a> ·
   <a href="#releases"><b>Releases</b></a>
 </p>
@@ -80,7 +80,7 @@ Gerechnet wird monatsgenau für einen Haushalt mit zwei Personen, von heute bis 
 - Break-even-Zins für die Anschlussfinanzierung
 - Jahrestabelle
 
-## Rechtsstand und Annahmen
+## Gesetzliche Werte und Annahmen
 
 | Bereich | Stand im Rechner | Status |
 |---|---|---|

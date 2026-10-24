@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════
-// RECHTSSTAND: gesetzliche Werte nach Jahr, mit Status und Quelle
+// GESETZLICHE WERTE nach Jahr, mit Status und Quelle
 // Status: G = geltendes Recht, B = beschlossen, E = Entwurf, A = Annahme
 // ═══════════════════════════════════════════════════════════════
 const LAW = {

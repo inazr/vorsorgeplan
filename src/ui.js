@@ -588,7 +588,7 @@ function renderP1() {
       </div>
     </div>
   </div>
-  <details class="card"><summary>Rechtsstand und Quellen</summary>${legalTable()}
+  <details class="card"><summary>Gesetzliche Werte und Quellen</summary>${legalTable()}
     <p class="note">Offen sind vor allem die Krankenversicherung auf Auszahlungen des Altersvorsorgedepots bei freiwillig Versicherten, der Tarif ab 2029 und der Zusatzbeitrag bis 2080. Das Gesetz zum Altersvorsorgedepot ist verkündet (BGBl. 2026 I Nr. 156), ein Produkt war im Oktober 2026 noch nicht zertifiziert.</p>
   </details>`;
   $('#btn-split').onclick = () => { autoSplit(); commit(); };
