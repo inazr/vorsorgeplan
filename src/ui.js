@@ -749,7 +749,8 @@ function baseOpt(extra = {}) {
     grid: { left: 8, right: 16, top: window.innerWidth < 600 ? 68 : 44, bottom: 8, containLabel: true },
     legend: { top: 0, left: 0, textStyle: { color: ink2, fontSize: 12 }, itemWidth: 12, itemHeight: 8, icon: 'roundRect' },
     tooltip: { trigger: 'axis', backgroundColor: surf, borderColor: line, textStyle: { color: cssv('--ink'), fontSize: 12 }, formatter: ps => tip(ps[0].axisValue, tipSeries(ps)) },
-    xAxis: { type: 'category', axisLine: { lineStyle: { color: line } }, axisTick: { show: false }, axisLabel: { color: ink3 } },
+    // Angebrochene Jahre („2064 (3 Mon.)“) nur im Tooltip, an der Achse nur die Jahreszahl
+    xAxis: { type: 'category', axisLine: { lineStyle: { color: line } }, axisTick: { show: false }, axisLabel: { color: ink3, formatter: v => String(v).replace(/ \(.*\)$/, '') } },
     yAxis: { type: 'value', splitLine: { lineStyle: { color: line, type: [3, 3] } }, axisLabel: { color: ink3, formatter: v => Math.abs(v) >= 1e6 ? (v / 1e6).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' Mio.' : Math.abs(v) >= 1e3 ? (v / 1e3).toLocaleString('de-DE', { maximumFractionDigits: 1 }) + ' Tsd.' : nf0.format(v) } },
     ...extra,
   };
@@ -823,16 +824,36 @@ function chartIRR(c) {
       label: { show: window.innerWidth >= 600, position: 'top', fontSize: 11, color: cssv('--ink-2'), formatter: p => p.value == null ? '' : pc(p.value) } })),
   }), true);
 }
+// Verrentung: Basisrente und private RV fallen im Jahr des Rentenbeginns senkrecht ab. Dafür ist die x-Achse eine Zahlenachse und
+// das Jahr eines Rentenbeginns kommt doppelt vor: knapp davor mit dem Kapital bei Rentenbeginn (pre), dann mit dem Jahresendwert.
+// Datenpunkte als [y, x] mit encode, denn ECharts stapelt die erste Zahlenspalte.
+const yearPts = (sim, starts) => sim.rows.flatMap(r => starts.includes(r.year) ? [{ r, x: r.year - 1e-6, pre: true }, { r, x: r.year }] : [{ r, x: r.year }]);
+// Kapital bei Rentenbeginn in heutiger Kaufkraft: Preisindex zum Monat des Rentenbeginns (Jahresendwerte nutzen den Index ihres Jahres)
+function dvK0(sim, r, q) {
+  if (!chartReal) return q.K0;
+  const prev = sim.rows.find(x => x.year === r.year - 1);
+  return q.K0 / (prev ? prev.priceIdx * Math.pow(r.priceIdx / prev.priceIdx, (q.s0 % 12) / 12) : r.priceIdx);
+}
+const xy = (pts, f) => ({ data: pts.map(p => [f(p), p.x]), encode: { x: 1, y: 0 } });
+const yearAxis = pts => ({
+  xAxis: { ...baseOpt().xAxis, type: 'value', min: pts[0].x, max: pts[pts.length - 1].x, splitLine: { show: false }, axisLabel: { ...baseOpt().xAxis.axisLabel, formatter: String, showMinLabel: false, showMaxLabel: false } },
+  tooltip: { ...baseOpt().tooltip, formatter: ps => tip(Math.round(ps[0].value[1]), ps.map(p => tipRow(`${p.marker}${esc(p.seriesName)}`, p.value[0]))) },
+});
 function chartWealth(c) {
   const { sim, PC, others, scC } = c;
+  const idx = chartPerson >= 0 ? [chartPerson] : ST.I.persons.map((_, i) => i);
+  const pts = yearPts(sim, idx.flatMap(i => POLICIES.map(k => sim.pol[i][k]?.startY)).filter(Boolean));
+  // Kapital der Verträge, die in diesem Jahr verrentet werden (nur am Punkt vor dem Abfall)
+  const k0 = (p, k) => p.pre ? sum(idx.map(i => sim.pol[i][k]?.startY === p.r.year ? dvK0(sim, p.r, sim.pol[i][k]) : 0)) : 0;
+  const w = (p, k) => dv(p.r, V(p.r, k)) + k0(p, k);
   chartOf('ch-wealth').setOption(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: c.years },
+    ...yearAxis(pts),
     series: [
-      ...ORDER_WEALTH.flatMap(k => k === 'etf' ? [area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', sim.rows.map(r => dv(r, V(r, 'etf'))), PC.etf, 'w')]
-        : on(sim, k) ? [area(PROD[k].chart, sim.rows.map(r => dv(r, V(r, k))), PC[k], 'w')] : []),
-      ...(sim.rows.some(r => r.debt > 0) ? [area('Restschuld Haus', sim.rows.map(r => -dv(r, V(r, 'debt'))), c.C8, 'd')] : []),
-      total('Nettovermögen', sim.rows.map(r => dv(r, V(r, 'netWorth'))), c.ink, wLine(c.ws)),
-      ...others.map(k => ({ name: 'Nettovermögen ' + SCN[k], type: 'line', symbol: 'none', data: simOf(k).rows.map(r => dv(r, V(r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: scC(k) }, itemStyle: { color: scC(k) } })),
+      ...ORDER_WEALTH.flatMap(k => k === 'etf' ? [{ ...area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', null, PC.etf, 'w'), ...xy(pts, p => w(p, 'etf')) }]
+        : on(sim, k) ? [{ ...area(PROD[k].chart, null, PC[k], 'w'), ...xy(pts, p => w(p, k)) }] : []),
+      ...(sim.rows.some(r => r.debt > 0) ? [{ ...area('Restschuld Haus', null, c.C8, 'd'), ...xy(pts, p => -w(p, 'debt')) }] : []),
+      { ...total('Nettovermögen', null, c.ink, wLine(c.ws)), ...xy(pts, p => w(p, 'netWorth') + sum(POLICIES.map(k => k0(p, k)))) },
+      ...others.map(k => ({ name: 'Nettovermögen ' + SCN[k], type: 'line', symbol: 'none', ...xy(simOf(k).rows.map(r => ({ r, x: r.year })), p => dv(p.r, V(p.r, 'netWorth'))), lineStyle: { width: 2, type: [6, 4], color: scC(k) }, itemStyle: { color: scC(k) } })),
     ],
   }), true);
 }
@@ -866,21 +887,18 @@ function chartProducts() {
     if (!own.length) return;
     $('#prod-sub-' + k).textContent = `${SCN[sk]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · ${realLabel()}`;
     const zul = k === 'avd', pin = (zul ? 'Einzahlungen inkl. Zulagen' : 'Einzahlungen');
-    // Verrentung: Basisrente und private RV enden im Jahr des Rentenbeginns senkrecht. Dafür ist die x-Achse eine Zahlenachse und
-    // das Jahr des Rentenbeginns kommt doppelt vor: knapp davor das Kapital bei Rentenbeginn, dann 0, danach keine Werte mehr.
-    // Datenpunkte als [y, x] mit encode, denn ECharts stapelt die erste Zahlenspalte.
+    // Senkrechter Abfall bei Verrentung (siehe yearPts), nach der letzten Verrentung keine Werte mehr
     const q = own.map(i => sim.pol[i][k]), start = q.map(x => x?.startY || Infinity), last = Math.max(...start);
-    const pts = sim.rows.flatMap(r => start.includes(r.year) ? [{ r, x: r.year - 1e-6, pre: true }, { r, x: r.year }] : [{ r, x: r.year }]);
-    const cap = (j, { r, pre }) => r.year < start[j] ? dv(r, r[k][own[j]]) : r.year === start[j] && pre ? dv(r, q[j].K0) : r.year > last ? null : 0;
+    const pts = yearPts(sim, start);
+    const cap = (j, { r, pre }) => r.year < start[j] ? dv(r, r[k][own[j]]) : r.year === start[j] && pre ? dvK0(sim, r, q[j]) : r.year > last ? null : 0;
     let cum = 0;
     const paidIn = new Map(sim.rows.map(r => { cum += dv(r, own.reduce((a, i) => a + r.pp[i][k + 'In'] + (zul ? r.pp[i].zul : 0), 0)); return [r, cum]; }));   // jede Einzahlung in der Kaufkraft ihres Jahres
     const ch = chartOf('ch-prod-' + k); ch.resize();   // Karte war evtl. ausgeblendet (Größe 0)
     ch.setOption(baseOpt({
-      xAxis: { ...baseOpt().xAxis, type: 'value', min: pts[0].x, max: pts[pts.length - 1].x, splitLine: { show: false }, axisLabel: { ...baseOpt().xAxis.axisLabel, formatter: String, showMinLabel: false, showMaxLabel: false } },
-      tooltip: { ...baseOpt().tooltip, formatter: ps => tip(pts[ps[0].dataIndex].r.year, ps.map(p => tipRow(`${p.marker}${esc(p.seriesName)}`, p.value[0]))) },
+      ...yearAxis(pts),
       series: [
-        ...own.map((i, j) => ({ ...area(P[i].name, pts.map(p => [cap(j, p), p.x]), PPC[i], 'a'), encode: { x: 1, y: 0 } })),
-        { name: own.length > 1 ? 'Gemeinsame ' + pin : pin, type: 'line', symbol: 'none', data: pts.map(p => [paidIn.get(p.r), p.x]), encode: { x: 1, y: 0 }, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(sim.wStartYear) },
+        ...own.map((i, j) => ({ ...area(P[i].name, null, PPC[i], 'a'), ...xy(pts, p => cap(j, p)) })),
+        { name: own.length > 1 ? 'Gemeinsame ' + pin : pin, type: 'line', symbol: 'none', ...xy(pts, p => paidIn.get(p.r)), lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(sim.wStartYear) },
       ],
     }), true);
   });

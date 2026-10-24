@@ -1,6 +1,6 @@
 {
   "name": "vorsorgeplan",
-  "version": "1.5.0",
+  "version": "1.5.1",
   "description": "Altersvorsorge-Rechner: Altersvorsorgedepot gegen ETF-Depot mit deutscher Steuer, Kranken- und Pflegeversicherung, Optimierer und Monte Carlo",
   "private": true,
   "type": "module",
