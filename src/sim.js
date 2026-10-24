@@ -154,9 +154,11 @@ function polFields(o, k, v, io, pay) {
 
 // KV/PV der Rentner je Person (eigener Anteil). Kapitalerträge hälftig je Ehegatte.
 function kvRetire(ctx, y, kapPerPerson) {
-  const { persons, kv } = ctx, { year, L, pvZu, grv, avdPay, polGross, lumpKV } = y;
+  const { persons, kv, opt } = ctx, { year, L, pvZu, grv, avdPay, polPay, polGross, lumpKV } = y;
   let tot = 0, deductible = 0;
   const per = persons.map(() => 0);
+  // Nur in der Detailrechnung: Beiträge freiwillig Versicherter je Quelle (für die Rendite je Produkt)
+  const by = opt.detail ? persons.map(() => ({ avd: 0, basis: 0, prv: 0, etf: 0 })) : null;
   persons.forEach((p, i) => {
     const m = monthsRetired(p, year);
     if (m <= 0) return;
@@ -181,10 +183,14 @@ function kvRetire(ctx, y, kapPerPerson) {
       const bS = Math.min(sonst, rest);
       const fehl = Math.max(0, L.bez / 3 * f - bR - bS);   // Mindestbemessung
       c += (bS + fehl) * (SV.kvErm + L.zus + pvRate);
+      if (by && sonst > 0) {
+        const q = bS * (SV.kvErm + L.zus + pvRate) / sonst;
+        Object.assign(by[i], { avd: avdPay[i].gross * q, basis: polPay[i].basis.gross * q, prv: (polPay[i].prv.gross + lumpKV[i]) * q, etf: kapPerPerson * f * q });
+      }
     }
     tot += c; deductible += c; per[i] = c;
   });
-  return { tot, deductible, per };
+  return { tot, deductible, per, by };
 }
 
 // Steuer + SV für gegebenen ETF-Verkauf G (Probeverkauf, das Depot bleibt unverändert)
@@ -600,13 +606,16 @@ function buildRow(ctx, y) {
   const pp = persons.map((p, i) => {
     const estShare = taxBaseSum > 0 ? (ev.it.est + ev.it.soli) * taxBase[i] / taxBaseSum : (ev.it.est + ev.it.soli) / np;
     const kvI = ev.kvR.per[i];
+    // Einkommensteuer je Produkt nach Anteil am steuerpflichtigen Einkommen, KV-Beiträge je Quelle (für die Rendite je Produkt)
+    const estOf = x => taxBase[i] > 0 ? estShare * x / taxBase[i] : 0;
+    const estBy = { avd: estOf(avdPay[i].taxable), ...Object.fromEntries(POLICIES.map(k => [k, estOf(polPay[i][k].taxable)])) };
     const net = inWithdraw ? grvW[i] + avdW[i] + polW[i] + G / np - estShare * wT - ev.kt.taxW / np - kvI * kvShare[i] - extraInvest / np : 0;
     const o = {
       etf: dv / np, avd: av[i], etfContrib: etfContrib / np, avdReinvest: avdReinvest / np, taxFromBudget: taxFromBudget / np, avdIn: avdIn[i].cF + avdIn[i].cU, zul: avdIn[i].zul,
       refund: refundPer[i], loanPay: loanPay / np, loanSonder: loanSonder / np, budget: budget / np, debt: debt / np, netWorth: (dv - debt) / np + av[i] + pvP[i],
       basisRefund: basisRefundPer[i], lump: lumpPer[i], lumpTax: lumpTaxPer[i],
       grv: grv[i], avdPay: avdPay[i].gross, etfSale: sellG / np, grvW: grvW[i], avdPayW: avdW[i], estW: estShare * wT, kvW: kvI * kvShare[i], kapTaxW: ev.kt.taxW / np,
-      est: estShare, kapTax: ev.kt.tax / np, kv: kvI, net, total: dv / np + av[i] + pvP[i],
+      est: estShare, kapTax: ev.kt.tax / np, kv: kvI, net, total: dv / np + av[i] + pvP[i], estBy, kvBy: ev.kvR.by[i],
     };
     for (const k of POLICIES) polFields(o, k, pv[i][k], polIn[i][k], polPay[i][k]);
     return o;
@@ -621,7 +630,7 @@ function buildRow(ctx, y) {
     grv, avdPay: avdPay.map(a => a.gross), etfSale: sellG, houseSale: houseG,
     grvW, avdPayW: avdW, estW: (ev.it.est + ev.it.soli) * wT, kapTaxW: ev.kt.taxW, kvW: sum(ev.kvR.per.map((c, i) => c * kvShare[i])),
     est: ev.it.est, soli: ev.it.soli, kapTax: ev.kt.tax,
-    kv: ev.kvR.tot, net: inWithdraw ? netIncome : 0,
+    kv: ev.kvR.tot, net: inWithdraw ? netIncome : 0, extraInvest,
     basisDed, ep: [...ep], funds: depot.funds.map(fundValue), pp,
   };
   for (const k of POLICIES) polFields(row, k, pv.map(o => o[k]), polIn.map(o => o[k]), polPay.map(o => o[k]));
@@ -655,10 +664,12 @@ function simulate(I, A, opt) {
 
   const polCap = sum(pol.map(o => sumPol(o, q => q ? q.s.K : 0)));
   const final = depotValue(depot) + avd.reduce((s, a) => s + avdValue(a), 0) + polCap;
+  // Abgeltungsteuer, die beim Verkauf des Restdepots fällig wäre (ohne Sparerpauschbetrag; für die Rendite des ETF-Depots)
+  const etfTaxLatent = opt.detail ? Math.max(0, depotSell(depot, depotValue(depot), I.depot.sellMode, true).taxable) * LAW.abgSt * (1 + LAW.soliKap) : 0;
   return {
     rows, depleted: ctx.depleted, depletedYear: ctx.depletedYear, wStartYear: ctx.wStartYear, wFullYear: ctx.wFullYear, endYear: ctx.endYear, startReal: ctx.startReal,
     finalReal: (final - loans.reduce((a, l) => a + l.bal, 0)) / ctx.priceIdx,
-    final,
+    final, etfTaxLatent,
     kv: ctx.kv, sumZulagen: ctx.sumZulagen, sumRefunds: ctx.sumRefunds, houseSale: ctx.houseSale, loans, sumBasisRefund: ctx.sumBasisRefund,
     pol: pol.map(o => Object.fromEntries(POLICIES.map(k => [k, o[k] && { ...o[k].s, s0: o[k].s0, half: o[k].half }]))),
     ep: ctx.ep,

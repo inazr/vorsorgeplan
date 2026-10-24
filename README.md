@@ -73,7 +73,7 @@ Gerechnet wird monatsgenau für einen Haushalt mit zwei Personen, von heute bis 
 - Drei Strategien: höchstes gleichbleibendes Netto bis zum Zielalter, ewige Rente (das Nettovermögen bleibt real erhalten) oder Reichweite für ein vorgegebenes Wunsch-Netto
 
 **Auswertung**
-- Kennzahlen für nur ETF, deine Aufteilung und das Optimum, Aufteilung nach Personen, Charts zu Vermögen, Fonds, Vorsorgeprodukten, Sparraten, Einkommen und Abzügen mit Summen im Tooltip
+- Kennzahlen für nur ETF, deine Aufteilung und das Optimum, Aufteilung nach Personen, Charts zu Vermögen, Fonds, Vorsorgeprodukten, Sparraten, Einkommen und Abzügen mit Summen im Tooltip, Rendite je Anlage als interner Zinsfuß (IRR) nach Steuern und KV
 - Alle Werte wahlweise in heutiger Kaufkraft oder nominal, für den Haushalt oder je Person
 - Optimierer für die Aufteilung des Budgets: schnell bei fester Rendite oder per Monte Carlo auf das 10-, 25- oder 50-%-Perzentil
 - Monte-Carlo-Simulation mit zufälligen Renditen und Inflation (Perzentile 10 bis 90 %)

@@ -197,3 +197,53 @@ function houseBreakEven(I, A, scenario) {
   for (let k = 0; k < 18; k++) { const m = (lo + hi) / 2; if (f(m) > 0) lo = m; else hi = m; }
   return { rate: (lo + hi) / 2, netEtf };
 }
+
+// ─── Rendite je Anlage: interner Zinsfuß (IRR) der Zahlungen aus Sicht des Haushalts ───
+// flows: [{ t (Jahre ab Rechnungsbeginn), v (> 0 Zufluss, < 0 Einzahlung) }]. null, wenn es keinen Vorzeichenwechsel gibt.
+function irr(flows) {
+  const by = new Map();
+  for (const { t, v } of flows) by.set(t, (by.get(t) || 0) + v);
+  const F = [...by].filter(([, v]) => Math.abs(v) >= 0.01);   // Rundungsreste (z. B. leeres Restkapital) würden bei negativen Zinsen alles überwiegen
+  if (!F.some(([, v]) => v > 0) || !F.some(([, v]) => v < 0)) return null;
+  const npv = r => F.reduce((a, [t, v]) => a + v * Math.pow(1 + r, -t), 0);
+  let lo = -0.9, hi = 1;
+  if (npv(lo) * npv(hi) > 0) return null;
+  for (let k = 0; k < 80; k++) { const m = (lo + hi) / 2; if (npv(m) * npv(lo) > 0) lo = m; else hi = m; }
+  return (lo + hi) / 2;
+}
+
+// Zahlungen je Anlage aus den Jahreszeilen (simulate mit detail), Zahlungen zur Jahresmitte, Restwerte am Ende des letzten Jahres.
+// Vorsorgeprodukte je Person: eigene Beiträge (mit Zuzahlungen aus Erstattungen) raus; Auszahlungen abzüglich anteiliger
+// Einkommensteuer und KV, Kapitalauszahlung nach Steuer, Erstattungen (§ 10a, Basisrente) im Folgejahr und Restkapital rein.
+// Zulagen fließen ins Produkt und zählen daher nur über die Auszahlungen.
+// ETF-Depot gemeinsam: Startwert und Einzahlungen (Sparrate, Reinvestitionen) raus; Verkäufe nach Kapitalertragsteuer und KV
+// sowie der Restwert nach latenter Abgeltungsteuer rein. Je Person gilt dieselbe Rendite (Hälfte aller Zahlungen).
+// real: Zahlungen in heutiger Kaufkraft. Rückgabe { etf, avd, basis, prv }: je { per: [IRR je Person oder null], hh }.
+function productIRR(sim, I, real) {
+  const rows = sim.rows, last = rows[rows.length - 1], Y0 = I.startYear, tEnd = last.year - Y0 + 1;
+  const d = (r, v) => real ? v / r.priceIdx : v;
+  const out = {};
+  const etf = [{ t: 0, v: -I.depot.startValue }, { t: tEnd, v: d(last, last.etf - sim.etfTaxLatent) }];
+  for (const r of rows) etf.push({ t: r.year - Y0 + 0.5, v: d(r, r.etfSale - r.kapTax - r.etfContrib - sum(r.pp.map(p => p.kvBy?.etf || 0))) });
+  const e = irr(etf);
+  out.etf = { per: I.persons.map(() => e), hh: e };
+  for (const k of ['avd', ...POLICIES]) {
+    const per = I.persons.map((_, i) => {
+      const F = [];
+      let used = false;
+      for (const r of rows) {
+        const p = r.pp[i], t = r.year - Y0 + 0.5;
+        const paid = k === 'avd' ? p.avdIn : p[k + 'In'];
+        const pay = (k === 'avd' ? p.avdPay : p[k + 'Pay']) + (POLICY_DEF[k]?.lump ? p.lump - p.lumpTax : 0);
+        const refund = k === 'avd' ? p.refund : POLICY_DEF[k].deduct ? p.basisRefund : 0;   // basisRefund: Erstattung aller abzugsfähigen Verträge (nur Basisrente)
+        if (paid > 0) used = true;
+        F.push({ t, v: d(r, pay - (p.estBy?.[k] || 0) - (p.kvBy?.[k] || 0) - paid) });
+        if (refund) F.push({ t: t + 1, v: d(r, refund) });
+      }
+      F.push({ t: tEnd, v: d(last, k === 'avd' ? last.pp[i].avd : last.pp[i][k]) });
+      return used ? F : null;
+    });
+    out[k] = { per: per.map(F => F && irr(F)), hh: per.some(Boolean) ? irr(per.filter(Boolean).flat()) : null };
+  }
+  return out;
+}

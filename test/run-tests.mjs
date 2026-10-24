@@ -365,5 +365,28 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('selfRv: Höchstbetrag zusätzlich um den vollen RV-Beitrag gekürzt', near(rv.dedB - rv.dedA, rv.rs * 40000, 0.01), `${rv.dedB - rv.dedA}`);
 }
 
+// 24. Rendite je Anlage (IRR): Zinsfuß, Aufteilung von Steuer und KV, plausible Größenordnung
+{
+  check('irr: 100 → 110 nach einem Jahr = 10 %', near(g(`irr([{ t: 0, v: -100 }, { t: 1, v: 110 }])`), 0.1, 1e-9));
+  check('irr: ohne Zufluss null', g(`irr([{ t: 0, v: -100 }, { t: 1, v: 0 }])`) === null);
+  check('irr: Rundungsrest am Ende stört nicht', near(g(`irr([{ t: 0, v: -100 }, { t: 1, v: 110 }, { t: 30, v: -1e-12 }])`), 0.1, 1e-9));
+  const r = g(`(() => { const run = (f, sc) => { const { I, A } = mk(f); const s = simulate(I, A, { scenario: sc, targetReal: 8000, detail: true }); return { s, I, A, nom: productIRR(s, I, false), real: productIRR(s, I, true) }; };
+    const pol = I => I.persons.forEach(p => { p.basis.on = true; p.basis.beitrag = 3000; p.prv.on = true; p.prv.beitrag = 1800; });
+    const b = run(pol, 'B'), a = run(null, 'A'), fw = run(I => { pol(I); I.persons.forEach(p => p.kvdr = 'nein'); }, 'B');
+    const row = b.s.rows.find(x => x.year === b.s.wFullYear), p0 = row.pp[0];
+    const estSum = p0.estBy.avd + p0.estBy.basis + p0.estBy.prv;
+    const kvOk = b.s.rows.every(x => x.pp.every(p => !p.kvBy || (p.kvBy.avd === 0 && p.kvBy.prv === 0)));
+    const kvFw = fw.s.rows.some(x => x.pp.some(p => p.kvBy && p.kvBy.prv > 0 && p.kvBy.avd > 0));
+    return { b: b.nom, br: b.real, a: a.nom, estSum, est: p0.est, kvOk, kvFw, ret: b.A.ret, infl: b.A.inflation }; })()`);
+  check('IRR: nur ETF ohne Vorsorgeprodukte', r.a.avd.hh === null && r.a.basis.hh === null && r.a.etf.hh > 0, JSON.stringify(r.a));
+  check('IRR: ETF-Depot unter der Marktrendite (TER, Steuern)', r.b.etf.hh > 0.04 && r.b.etf.hh < r.ret, r.b.etf.hh);
+  check('IRR: alle Produkte mit Ergebnis', ['avd', 'basis', 'prv'].every(k => r.b[k].per.every(x => x > 0 && x < 0.15) && r.b[k].hh > 0), JSON.stringify(r.b));
+  check('IRR: Haushalt zwischen den Personen', ['avd', 'basis', 'prv'].every(k => r.b[k].hh >= Math.min(...r.b[k].per) - 1e-9 && r.b[k].hh <= Math.max(...r.b[k].per) + 1e-9));
+  check('IRR real ≈ nominal abzüglich Inflation', near((1 + r.b.etf.hh) / (1 + r.infl) - 1, r.br.etf.hh, 0.002), `${r.b.etf.hh} / ${r.br.etf.hh}`);
+  check('Einkommensteuer je Produkt höchstens der Personenanteil', r.estSum > 0 && r.estSum <= r.est + 1e-6, `${r.estSum} / ${r.est}`);
+  check('KVdR: keine KV auf AVD und private RV', r.kvOk);
+  check('freiwillig: KV auf AVD und private RV zugeordnet', r.kvFw);
+}
+
 console.log(`${ok} Prüfungen bestanden, ${fail} fehlgeschlagen`);
 process.exit(fail ? 1 : 0);

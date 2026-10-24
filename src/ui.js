@@ -689,6 +689,7 @@ function renderP2() {
     <div class="tablebox" id="who"></div>
     <p class="muted" style="margin:0;font-size:12px">Die Einkommensteuer wird bei Zusammenveranlagung gemeinsam festgesetzt. Hier wird sie nach dem Anteil am steuerpflichtigen Einkommen verteilt. Das gemeinsame ETF-Depot, die Kapitalertragsteuer und der Kredit zählen je zur Hälfte.</p>
   </div>
+  <div class="card"><div class="card-h"><h2>Rendite je Anlage<span class="infotip" tabindex="0" aria-label="Methode">i<span class="tip" role="tooltip"><b>Interner Zinsfuß (IRR):</b> die jährliche Verzinsung, bei der alle Zahlungen einer Anlage zusammen 0 ergeben. Sie berücksichtigt, wann und wie viel eingezahlt wird. <b>Eingezahlt:</b> eigene Beiträge, beim ETF-Depot Startwert, Sparraten und reinvestierte Auszahlungen. <b>Zurück:</b> Auszahlungen nach Einkommensteuer und Kranken- und Pflegeversicherung, Steuererstattungen (§ 10a, Basisrente) und das Restkapital zum Zielalter, beim ETF-Depot nach Abgeltungsteuer. Zulagen erhöhen die Rendite über die Auszahlungen. Die Einkommensteuer wird nach dem Anteil am steuerpflichtigen Einkommen verteilt (Durchschnitts-, nicht Grenzsteuersatz). Renten zählen bis zum Zielalter: Wer länger lebt, erzielt mit Renten eine höhere Rendite.</span></span></h2><span class="muted" id="irr-sub"></span></div><div class="chart sm" id="ch-irr" role="img" aria-label="Rendite je Anlage und Person"></div></div>
   <div class="card"><div class="card-h"><h2>Vermögen<span class="infotip" tabindex="0" aria-label="Hinweis">i<span class="tip" role="tooltip"><b>Verrentung:</b> Basisrente und private Rentenversicherung werden bei Rentenbeginn verrentet. Das Kapital geht an den Versicherer und wird zu einer lebenslangen Rente. Es lässt sich danach nicht mehr entnehmen oder vererben und fällt deshalb im Vermögen auf 0. Die Rente steht im Chart „Einkommen im Ruhestand“. Ein Kapitalanteil der privaten RV fließt nach Steuern ins ETF-Depot. Das Altersvorsorgedepot läuft dagegen als Auszahlplan und bleibt bis zum Planende dein Vermögen.</span></span></h2><span class="muted" id="wealth-sub"></span></div><div class="chart" id="ch-wealth" role="img" aria-label="Vermögensverlauf"></div></div>
   <div class="card"><div class="card-h"><h2>Kapital je ETF-Sparplan</h2><span class="muted" id="funds-sub"></span></div><div class="chart" id="ch-funds" role="img" aria-label="Kapital je ETF-Sparplan"></div></div>
   ${PK.map(k => `<div class="card" hidden><div class="card-h"><h2>${PROD[k].name}</h2><span class="muted" id="prod-sub-${k}"></span></div><div class="chart" id="ch-prod-${k}" role="img" aria-label="Kapital ${PROD[k].inl} je Person"></div></div>`).join('')}
@@ -736,7 +737,7 @@ function chartOf(id) {
   return charts[id];
 }
 // Tooltip: Bezeichnungen links, Werte rechtsbündig untereinander
-const tipRow = (label, v, strong) => `<span${strong ? ' style="font-weight:700"' : ''}>${label}</span><span style="text-align:right;font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:${strong ? 700 : 600}">${v == null ? '–' : eur(v)}</span>`;
+const tipRow = (label, v, strong, fmt = eur) => `<span${strong ? ' style="font-weight:700"' : ''}>${label}</span><span style="text-align:right;font-family:var(--font-num);font-variant-numeric:tabular-nums;font-weight:${strong ? 700 : 600}">${v == null ? '–' : fmt(v)}</span>`;
 const tipSum = ps => tipRow('Summe', ps.reduce((a, p) => a + (p.value || 0), 0), true);
 const tip = (title, rows) => `<b>${title}</b><div style="display:grid;grid-template-columns:auto auto;column-gap:16px;row-gap:2px;margin-top:4px">${rows.join('')}</div>`;
 const tipSeries = ps => ps.map(p => tipRow(`${p.marker}${esc(p.seriesName)}`, p.value));
@@ -755,7 +756,7 @@ function baseOpt(extra = {}) {
 }
 // Platz für mehrzeilige Legenden in den kleinen Charts
 const withLegend = opt => { const n = opt.series.length, el = 44 + (n > 4 ? 22 : 0) + (n > 7 ? 22 : 0); opt.grid = { ...opt.grid, top: window.innerWidth < 600 ? el + 24 : el }; return opt; };
-function renderWho(sim) {
+function renderWho(sim, irr) {
   const ws = sim.wFullYear;
   const r = sim.rows.find(x => x.year === ws), rb = sim.rows.find(x => x.year === sim.wStartYear - 1);
   if (!r) { $('#who').innerHTML = ''; return; }
@@ -779,8 +780,9 @@ function renderWho(sim) {
     ['Kapitalertragsteuer', who => '−' + m(V(r, 'kapTax', who))],
     ['Kranken- und Pflegeversicherung', who => '−' + m(V(r, 'kv', who))],
     ['Netto pro Monat', who => '<b>' + m(V(r, 'net', who)) + '</b>', true],
+    ...['etf', ...pk].map((k, j) => ['Rendite ' + (k === 'etf' ? 'ETF-Depot' : PROD[k].inl) + (j ? '' : ' (IRR)'), who => { const x = who < 0 ? irr[k].hh : irr[k].per[who]; return x == null ? '–' : pc(x); }, !j]),
   ];
-  $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal`;
+  $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal · Rendite bis Zielalter ${chartReal ? 'real' : 'nominal'}`;
   $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(P[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, sub]) => `<tr${sub ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 // Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
@@ -799,7 +801,7 @@ function chartCtx() {
   const PC = { grv: col['--s1'], etf: col['--s3'], ...Object.fromEntries(PK.map(k => [k, cssv(PROD[k].color)])) };
   const er = sim.rows.filter(r => r.wMonths > 0);   // Monatswerte der Entnahmemonate; angebrochene Jahre sind an der Achse markiert
   return {
-    sim, PC, er, others: ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k)),
+    sim, PC, er, irr: productIRR(sim, ST.I, chartReal), others: ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k)),
     C1: col['--s1'], C3: col['--s3'], C5: col['--s5'], C6: col['--s6'], C8: col['--s8'], CA: col['--sA'], ink: col['--ink'], surf: col['--surface'],
     years: sim.rows.map(r => r.year), ws: sim.wStartYear,
     who: chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt',
@@ -807,6 +809,19 @@ function chartCtx() {
     m: (r, v) => dv(r, v) / r.wMonths,
     wYear: r => r.wMonths < 12 ? `${r.year} (${r.wMonths} Mon.)` : r.year,
   };
+}
+// Rendite je Anlage (IRR) je Person und Haushalt, Produkte in den festen Farben
+function chartIRR(c) {
+  const { irr, PC, surf } = c, P = ST.I.persons;
+  const ks = ORDER_WEALTH.filter(k => irr[k].hh != null);
+  $('#irr-sub').textContent = `${SCN[chartScen]} · bis Zielalter ${ST.I.withdraw.targetAge} · nach Steuern und KV · ${chartReal ? 'real' : 'nominal'}`;
+  chartOf('ch-irr').setOption(baseOpt({
+    xAxis: { ...baseOpt().xAxis, data: [...P.map(p => p.name), 'Haushalt'] },
+    yAxis: { ...baseOpt().yAxis, axisLabel: { ...baseOpt().yAxis.axisLabel, formatter: v => pc(v, 0) } },
+    tooltip: { ...baseOpt().tooltip, axisPointer: { type: 'shadow' }, formatter: ps => tip(esc(ps[0].axisValue), ps.map(p => tipRow(`${p.marker}${esc(p.seriesName)}`, p.value, false, pc))) },
+    series: ks.map(k => ({ ...bar(k === 'etf' ? 'ETF-Depot' : PROD[k].chart, [...P.map((_, i) => irr[k].per[i]), irr[k].hh], PC[k], surf, null), barMaxWidth: 28,
+      label: { show: window.innerWidth >= 600, position: 'top', fontSize: 11, color: cssv('--ink-2'), formatter: p => p.value == null ? '' : pc(p.value) } })),
+  }), true);
 }
 function chartWealth(c) {
   const { sim, PC, others, scC } = c;
@@ -851,14 +866,21 @@ function chartProducts() {
     if (!own.length) return;
     $('#prod-sub-' + k).textContent = `${SCN[sk]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · ${realLabel()}`;
     const zul = k === 'avd', pin = (zul ? 'Einzahlungen inkl. Zulagen' : 'Einzahlungen');
+    // Verrentung: Basisrente und private RV enden im Jahr des Rentenbeginns senkrecht. Dafür ist die x-Achse eine Zahlenachse und
+    // das Jahr des Rentenbeginns kommt doppelt vor: knapp davor das Kapital bei Rentenbeginn, dann 0, danach keine Werte mehr.
+    // Datenpunkte als [y, x] mit encode, denn ECharts stapelt die erste Zahlenspalte.
+    const q = own.map(i => sim.pol[i][k]), start = q.map(x => x?.startY || Infinity), last = Math.max(...start);
+    const pts = sim.rows.flatMap(r => start.includes(r.year) ? [{ r, x: r.year - 1e-6, pre: true }, { r, x: r.year }] : [{ r, x: r.year }]);
+    const cap = (j, { r, pre }) => r.year < start[j] ? dv(r, r[k][own[j]]) : r.year === start[j] && pre ? dv(r, q[j].K0) : r.year > last ? null : 0;
     let cum = 0;
-    const paidIn = sim.rows.map(r => { cum += dv(r, own.reduce((a, i) => a + r.pp[i][k + 'In'] + (zul ? r.pp[i].zul : 0), 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
+    const paidIn = new Map(sim.rows.map(r => { cum += dv(r, own.reduce((a, i) => a + r.pp[i][k + 'In'] + (zul ? r.pp[i].zul : 0), 0)); return [r, cum]; }));   // jede Einzahlung in der Kaufkraft ihres Jahres
     const ch = chartOf('ch-prod-' + k); ch.resize();   // Karte war evtl. ausgeblendet (Größe 0)
     ch.setOption(baseOpt({
-      xAxis: { ...baseOpt().xAxis, data: sim.rows.map(r => r.year) },
+      xAxis: { ...baseOpt().xAxis, type: 'value', min: pts[0].x, max: pts[pts.length - 1].x, splitLine: { show: false }, axisLabel: { ...baseOpt().xAxis.axisLabel, formatter: String, showMinLabel: false, showMaxLabel: false } },
+      tooltip: { ...baseOpt().tooltip, formatter: ps => tip(pts[ps[0].dataIndex].r.year, ps.map(p => tipRow(`${p.marker}${esc(p.seriesName)}`, p.value[0]))) },
       series: [
-        ...own.map(i => area(P[i].name, sim.rows.map(r => dv(r, r[k][i])), PPC[i], 'a')),
-        { name: own.length > 1 ? 'Gemeinsame ' + pin : pin, type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(sim.wStartYear) },
+        ...own.map((i, j) => ({ ...area(P[i].name, pts.map(p => [cap(j, p), p.x]), PPC[i], 'a'), encode: { x: 1, y: 0 } })),
+        { name: own.length > 1 ? 'Gemeinsame ' + pin : pin, type: 'line', symbol: 'none', data: pts.map(p => [paidIn.get(p.r), p.x]), encode: { x: 1, y: 0 }, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(sim.wStartYear) },
       ],
     }), true);
   });
@@ -916,8 +938,8 @@ function renderCharts() {
   if (!R) return;
   const c = chartCtx();
   $('#wealth-sub').textContent = `${c.who} · Entnahme ab ${c.ws} · ${realLabel()}`;
-  renderWho(c.sim);
-  chartWealth(c); chartFunds(c); chartProducts(); chartSave(c); chartIncome(c); chartDeduct(c); chartCompare(c);
+  renderWho(c.sim, c.irr);
+  chartIRR(c); chartWealth(c); chartFunds(c); chartProducts(); chartSave(c); chartIncome(c); chartDeduct(c); chartCompare(c);
   renderTable(c.sim);
   if (MC) renderMC();
 }

@@ -42,7 +42,7 @@ function ertragsanteil(age) {
   return v / 100;
 }
 
-function makePolicy() { return { K: 0, paid: 0, cost: 0, paying: false, rentM: 0, startY: null, lump: 0, gain: 0 }; }
+function makePolicy() { return { K: 0, K0: 0, paid: 0, cost: 0, paying: false, rentM: 0, startY: null, lump: 0, gain: 0 }; }
 
 // Ein Jahr Ansparphase über mG Monate: Beitrag c (Monate 0 … cM), Zuzahlung z am Jahresanfang,
 // Kosten aus dem Beitrag, Kapitalkosten aus der Rendite. alphaY = Abschlusskosten dieses Jahres in €.
@@ -60,6 +60,7 @@ function policySaveYear(pol, cfg, R, { c, cM, z, alphaY, feeM, mG }) {
 // Rentenbeginn: Kapital in eine lebenslange Monatsrente umwandeln (teil = ausgezahlter Kapitalanteil)
 function policyAnnuitize(pol, cfg, year, teil = 0) {
   const share = Math.min(1, Math.max(0, teil));
+  pol.K0 = pol.K;   // Kapital bei Rentenbeginn (für die Charts)
   pol.lump = pol.K * share;
   pol.gain = Math.max(0, pol.K - pol.paid) * share;   // Ertragsanteil der Kapitalauszahlung (Beiträge anteilig angerechnet)
   pol.rentM = pol.K * (1 - share) / 10000 * cfg.rf;
