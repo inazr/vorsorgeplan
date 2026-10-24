@@ -30,4 +30,12 @@ function conform(base, val, key) {
   return val === undefined ? base : val;
 }
 const TPL_I = { ...DEFAULTS, loans: [loanTpl(2026)] };
-const loadState = p => ({ I: conform(TPL_I, deepMerge(clone(DEFAULTS), p.I)), A: conform(ASSUME, deepMerge(clone(ASSUME), p.A)) });
+const loadState = p => {
+  const s = { I: conform(TPL_I, deepMerge(clone(DEFAULTS), p.I)), A: conform(ASSUME, deepMerge(clone(ASSUME), p.A)) };
+  // Bis 1.4.0 enthielten die AVD-Kosten Fonds und Depot: auf Depotkosten (max. 1 %) und TER aufteilen, Summe bleibt
+  (p.I?.persons || []).forEach((q, i) => {
+    const a = s.I.persons[i]?.avd;
+    if (a && q?.avd?.cost != null && q.avd.ter == null) { const t = a.cost; a.cost = Math.min(t, AVD.costMax); a.ter = t - a.cost; }
+  });
+  return s;
+};

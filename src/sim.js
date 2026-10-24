@@ -574,9 +574,9 @@ function marketYear(ctx, y) {
   // ── Markt: Altersvorsorgedepot ──
   persons.forEach((p, i) => {
     if (!useAVD || !p.avd.on) return;
-    const a = avd[i];
-    if (avdIn[i].cF + avdIn[i].cU === 0) avdGrow(a, mk.R, p.avd.cost);
-    else avdSaveYear(a, mk.R, p.avd.cost, avdIn[i].cF, avdIn[i].cU, avdIn[i].zul, avdIn[i].m / 24);
+    const a = avd[i], cost = Math.min(p.avd.cost, AVD.costMax) + p.avd.ter;   // Depotkosten plus Fondskosten (TER)
+    if (avdIn[i].cF + avdIn[i].cU === 0) avdGrow(a, mk.R, cost);
+    else avdSaveYear(a, mk.R, cost, avdIn[i].cF, avdIn[i].cU, avdIn[i].zul, avdIn[i].m / 24);
   });
   const pvP = pol.map(o => sumPol(o, q => q ? q.s.K : 0));   // Vertragswerte je Person
   Object.assign(y, { dv: depotValue(depot), av: avd.map(avdValue), pvP, pvSum: sum(pvP) });
@@ -666,4 +666,6 @@ function simulate(I, A, opt) {
 }
 
 // AVD-Parameter (AltVRefG, verkündet BGBl. 2026 I Nr. 156)
-const AVD = { g1: 0.5, g1Cap: 360, g2: 0.25, fMax: 1800, minEigen: 120, kindMax: 300, einMax: 6840, payMin: 65, payMax: 70, planEndMin: 85, teilMax: 0.3 };
+// costMax: Depotkosten im Rechner höchstens 1 % (Annahme). Gesetzlich gedeckelt sind beim Standarddepot die Effektivkosten
+// (§ 2a Abs. 2 AltZertG n. F.); ob die TER der Fonds dazuzählt, regeln Gesetz und AltvPIBV nicht ausdrücklich.
+const AVD = { g1: 0.5, g1Cap: 360, g2: 0.25, fMax: 1800, minEigen: 120, kindMax: 300, einMax: 6840, payMin: 65, payMax: 70, planEndMin: 85, teilMax: 0.3, costMax: 0.01 };

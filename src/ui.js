@@ -412,7 +412,8 @@ function avdCard(i) {
     ${P.avd.on ? `<div class="fields">
       ${F(b + '.eigen', 'Geförderter Eigenbeitrag', { t: 'eur', u: '€/Jahr', step: 60, min: 0, max: AVD.fMax, h: `Maximal ${eur(AVD.fMax)}. Mindestens ${eur(AVD.minEigen)} für Zulagen.` })}
       ${F(b + '.extra', 'Zusätzlich ungefördert', { t: 'eur', u: '€/Jahr', step: 120, min: 0, max: AVD.einMax - AVD.fMax, h: `Bis ${eur(AVD.einMax)} insgesamt. Später wird nur der Ertrag besteuert.` })}
-      ${F(b + '.cost', 'Kosten des Depots', { t: 'pct', step: 0.05, h: 'Fonds plus Depot. Standarddepot max. 1 %.' })}
+      ${F(b + '.cost', 'Kosten des Depots', { t: 'pct', step: 0.05, min: 0, max: AVD.costMax * 100, h: `Depotführung und Verwaltung, im Rechner höchstens ${pc(AVD.costMax, 0)}. Gedeckelt sind beim Standarddepot die Effektivkosten (§ 2a AltZertG), ob die TER dazuzählt, ist nicht ausdrücklich geregelt.` })}
+      ${F(b + '.ter', 'Kosten des ETF (TER)', { t: 'pct', step: 0.01, min: 0, h: 'Laufende Fondskosten laut Basisinformationsblatt. Im Zweifel höher ansetzen.' })}
       ${S(b + '.teilkapital', 'Einmalauszahlung zu Beginn', Array.from({ length: Math.round(AVD.teilMax * 10) + 1 }, (_, k) => [k / 10, k === 0 ? 'Keine' : pc(k / 10, 0) + (k / 10 === AVD.teilMax ? ' (Maximum)' : '')]))}
       ${S(b + '.payStart', 'Auszahlung ab Alter', yearOpts(AVD.payMin, AVD.payMax))}
       ${S(b + '.payEnd', 'Auszahlungsplan bis Alter', yearOpts(AVD.planEndMin, 100))}

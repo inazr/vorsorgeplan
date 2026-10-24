@@ -331,6 +331,14 @@ const sumA = a => a.reduce((x, y) => x + y, 0);
   check('loadState: fehlende Felder aus Standardwerten', L.I.persons[0].avd.eigen === 1800, String(L.I.persons[0].avd.eigen));
   check('loadState: Kinder-Zulageempfänger ergänzt', L.I.children[0].zulageTo === 0, String(L.I.children[0]?.zulageTo));
   check('loadState({}) entspricht den Standardwerten', JSON.stringify(g('loadState({})')) === JSON.stringify({ I: g('DEFAULTS'), A: g('ASSUME') }));
+  // Alte Stände: AVD-Kosten enthielten Fonds und Depot, Aufteilung in Depotkosten (max. 1 %) und TER
+  const M = g(`loadState({ I: { persons: [{ avd: { cost: 0.015 } }, { avd: { cost: 0.003, ter: 0.004 } }] } }).I.persons.map(p => p.avd)`);
+  check('loadState: alte AVD-Kosten aufgeteilt', near(M[0].cost, 0.01, 1e-12) && near(M[0].ter, 0.005, 1e-12), JSON.stringify(M[0]));
+  check('loadState: Stand mit TER bleibt', M[1].cost === 0.003 && M[1].ter === 0.004, JSON.stringify(M[1]));
+  // Rechnung mit der Summe aus Depotkosten und TER, Depotkosten höchstens 1 %
+  const avdK = (c, t) => g(`(() => { const { I, A } = mk(I => I.persons.forEach(p => { p.avd.cost = ${c}; p.avd.ter = ${t}; })); return simulate(I, A, { scenario: 'B', targetReal: 9000 }).finalReal; })()`);
+  check('AVD-Kosten: Depot + TER zählen zusammen', near(avdK(0.001, 0.003), avdK(0.004, 0), 1e-6) && avdK(0.004, 0) < avdK(0, 0), '');
+  check('AVD-Kosten: Depotkosten auf 1 % begrenzt', near(avdK(0.02, 0), avdK(0.01, 0), 1e-6), '');
 }
 
 // 22. OPT_SPACE aus AVD/INS abgeleitet, gleiche Werte wie das frühere Literal
