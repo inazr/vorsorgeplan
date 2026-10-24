@@ -62,7 +62,7 @@ const PROD = {
 };
 const PK = Object.keys(PROD);
 // Stapelreihenfolgen der Charts, mit validate_palette geprüft (auch wenn einzelne Produkte fehlen)
-const ORDER_WEALTH = ['prv', 'etf', 'avd', 'basis'], ORDER_SAVE = ['prv', 'etf', 'basis', 'avd'], ORDER_INCOME = ['prv', 'grv', 'avd', 'etf', 'basis'];
+const ORDER_WEALTH = ['avd', 'etf', 'basis', 'prv'], ORDER_SAVE = ['prv', 'etf', 'basis', 'avd'], ORDER_INCOME = ['prv', 'grv', 'avd', 'etf', 'basis'];
 const fact = (l, v) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`;
 const FUND_C = ['--s1', '--s2', '--s3', '--s4', '--s5'];
 const dv = (r, v) => chartReal ? v / r.priceIdx : v;
@@ -689,9 +689,9 @@ function renderP2() {
     <div class="tablebox" id="who"></div>
     <p class="muted" style="margin:0;font-size:12px">Die Einkommensteuer wird bei Zusammenveranlagung gemeinsam festgesetzt. Hier wird sie nach dem Anteil am steuerpflichtigen Einkommen verteilt. Das gemeinsame ETF-Depot, die Kapitalertragsteuer und der Kredit zählen je zur Hälfte.</p>
   </div>
-  <div class="card"><div class="card-h"><h2>Vermögen</h2><span class="muted" id="wealth-sub"></span></div><div class="chart" id="ch-wealth" role="img" aria-label="Vermögensverlauf"></div></div>
+  <div class="card"><div class="card-h"><h2>Vermögen<span class="infotip" tabindex="0" aria-label="Hinweis">i<span class="tip" role="tooltip"><b>Verrentung:</b> Basisrente und private Rentenversicherung werden bei Rentenbeginn verrentet. Das Kapital geht an den Versicherer und wird zu einer lebenslangen Rente. Es lässt sich danach nicht mehr entnehmen oder vererben und fällt deshalb im Vermögen auf 0. Die Rente steht im Chart „Einkommen im Ruhestand“. Ein Kapitalanteil der privaten RV fließt nach Steuern ins ETF-Depot. Das Altersvorsorgedepot läuft dagegen als Auszahlplan und bleibt bis zum Planende dein Vermögen.</span></span></h2><span class="muted" id="wealth-sub"></span></div><div class="chart" id="ch-wealth" role="img" aria-label="Vermögensverlauf"></div></div>
   <div class="card"><div class="card-h"><h2>Kapital je ETF-Sparplan</h2><span class="muted" id="funds-sub"></span></div><div class="chart" id="ch-funds" role="img" aria-label="Kapital je ETF-Sparplan"></div></div>
-  <div class="card"><div class="card-h"><h2>Vorsorgeprodukte</h2><span class="muted" id="avd-sub"></span></div><div class="chart" id="ch-avd" role="img" aria-label="Kapital in Altersvorsorgedepot, Basisrente und privater Rentenversicherung"></div></div>
+  ${PK.map(k => `<div class="card" hidden><div class="card-h"><h2>${PROD[k].name}</h2><span class="muted" id="prod-sub-${k}"></span></div><div class="chart" id="ch-prod-${k}" role="img" aria-label="Kapital ${PROD[k].inl} je Person"></div></div>`).join('')}
   <div class="grid">
     <div class="card"><h2>Sparen pro Jahr<span class="infotip" tabindex="0" aria-label="Annahmen">i<span class="tip" role="tooltip"><b>Annahme:</b> Die Steuer auf Ausschüttungen und Vorabpauschale des ETF-Depots wird in der Sparphase aus dem Sparbudget bezahlt und mindert die ETF-Sparrate. Erstattungen aus dem Sonderausgabenabzug (§ 10a, Basisrente) fließen je nach Einstellung als Zuzahlung ins Produkt oder ins ETF-Depot.</span></span></h2><div class="chart sm" id="ch-save" role="img" aria-label="Sparbeiträge pro Jahr"></div></div>
     <div class="card"><h2>Einkommen im Ruhestand pro Monat</h2><div class="chart sm" id="ch-income" role="img" aria-label="Einkommen im Ruhestand"></div></div>
@@ -839,21 +839,29 @@ function chartFunds(c) {
       total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), c.ink, wLine(c.ws))],
   }), true);
 }
-// Vorsorgeprodukte: Kapital je Person (Flächen) und Einzahlungen (Linie)
+// Je Vorsorgeprodukt ein Chart: Kapital je Person (Flächen) und Einzahlungen (Linie); ungenutzte Produkte werden ausgeblendet
 function chartProducts() {
   const P = ST.I.persons, PPC = [cssv('--s1'), cssv('--s2')];
-  const k = chartScen === 'A' ? 'B' : chartScen, avdSim = simOf(k);   // nur ETF hat keine Vorsorgeprodukte
+  const sk = chartScen === 'A' ? 'B' : chartScen, sim = simOf(sk);   // nur ETF hat keine Vorsorgeprodukte
   const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
-  $('#avd-sub').textContent = `${SCN[k]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · Altersvorsorgedepot, Basisrente und private RV · ${realLabel()}`;
-  let cum = 0;
-  const paidIn = avdSim.rows.map(r => { cum += dv(r, idx.reduce((a, i) => PK.reduce((b, k) => b + r.pp[i][k + 'In'] + (k === 'avd' ? r.pp[i].zul : 0), a), 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
-  chartOf('ch-avd').setOption(baseOpt({
-    xAxis: { ...baseOpt().xAxis, data: avdSim.rows.map(r => r.year) },
-    series: [
-      ...idx.map(i => area(P[i].name, avdSim.rows.map(r => dv(r, PK.reduce((b, k) => b + r[k][i], 0))), PPC[i], 'a')),
-      { name: chartPerson >= 0 ? 'Einzahlungen inkl. Zulagen' : 'Gemeinsame Einzahlungen inkl. Zulagen', type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(avdSim.wStartYear) },
-    ],
-  }), true);
+  PK.forEach(k => {
+    const el = $('#ch-prod-' + k), card = el.closest('.card');
+    const own = idx.filter(i => sim.rows.some(r => r[k][i] > 0 || r.pp[i][k + 'In'] > 0));
+    card.hidden = !own.length;
+    if (!own.length) return;
+    $('#prod-sub-' + k).textContent = `${SCN[sk]} · ${chartPerson >= 0 ? P[chartPerson].name : 'Haushalt'} · ${realLabel()}`;
+    const zul = k === 'avd', pin = (zul ? 'Einzahlungen inkl. Zulagen' : 'Einzahlungen');
+    let cum = 0;
+    const paidIn = sim.rows.map(r => { cum += dv(r, own.reduce((a, i) => a + r.pp[i][k + 'In'] + (zul ? r.pp[i].zul : 0), 0)); return cum; });   // jede Einzahlung in der Kaufkraft ihres Jahres
+    const ch = chartOf('ch-prod-' + k); ch.resize();   // Karte war evtl. ausgeblendet (Größe 0)
+    ch.setOption(baseOpt({
+      xAxis: { ...baseOpt().xAxis, data: sim.rows.map(r => r.year) },
+      series: [
+        ...own.map(i => area(P[i].name, sim.rows.map(r => dv(r, r[k][i])), PPC[i], 'a')),
+        { name: own.length > 1 ? 'Gemeinsame ' + pin : pin, type: 'line', symbol: 'none', data: paidIn, lineStyle: { width: 2, type: [6, 4], color: cssv('--ink-2') }, itemStyle: { color: cssv('--ink-2') }, ...wLine(sim.wStartYear) },
+      ],
+    }), true);
+  });
 }
 function chartSave(c) {
   const { sim, PC, surf } = c;
