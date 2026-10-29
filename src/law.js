@@ -20,13 +20,22 @@ const LAW = {
     2026: { kfb: 9756, kg: 259, st: 'G' }, 2027: { kfb: 10056, kg: 267, st: 'E' }, 2028: { kfb: 10236, kg: 272, st: 'E' },
   },
   pausch: { anPausch: { 2026: 1230, 2027: { v: 1430, st: 'E' } }, rentnerWK: 102, sonderausg: 72 },
+  eb24b: { 2026: { v: 4260, plus: 240, st: 'G' } },   // Entlastungsbetrag für Alleinerziehende: erstes Kind, je weiteres Kind (§ 24b Abs. 2 EStG)
   abgSt: 0.25, soliKap: 0.055, sparerPB: 2000,
   basiszins: { 2023: 2.55, 2024: 2.29, 2025: 2.53, 2026: 3.20 },
+  // Altersentlastungsbetrag (§ 24a EStG, Status G): Satz und Höchstbetrag nach dem Jahr, das auf die Vollendung des 64. Lebensjahres folgt
+  altEntl(y) {
+    const n = Math.max(0, y - 2005), k = Math.min(n, 15), k2 = Math.min(Math.max(0, n - 15), 2), k3 = Math.max(0, n - 17);
+    return { pct: Math.max(0, 0.40 - 0.016 * k - 0.008 * k2 - 0.004 * k3), max: Math.max(0, 1900 - 76 * k - 38 * k2 - 19 * k3) };
+  },
   // Besteuerungsanteil Renten nach Wachstumschancengesetz
   besteuerungsanteil(y) {
     return (y <= 2005 ? 50 : y <= 2020 ? 50 + 2 * (y - 2005) : y <= 2022 ? 80 + (y - 2020) : Math.min(100, 82 + 0.5 * (y - 2022))) / 100;
   },
 };
+
+// Abgeltungssatz inkl. Soli und Kirchensteuer k (§ 32d Abs. 1 S. 3 EStG: Kirchensteuer mindert die Bemessungsgrundlage)
+function kapRate(k) { return LAW.abgSt / (1 + LAW.abgSt * k) * (1 + LAW.soliKap + k); }
 
 // Jahresweise Tabelle auflösen: letzter Eintrag mit Jahr <= year, davor der erste. Einträge sind Zahlen (gelten als 'G') oder Objekte mit st;
 // Entwürfe ('E') zählen nur mit useDraft. v ist bei { v, st } der innere Wert, sonst der ganze Eintrag.
@@ -40,9 +49,10 @@ function lawPick(table, year, useDraft = true) {
 }
 
 // Liefert den Tarif für ein Jahr. Nach dem letzten bekannten Jahr wird skaliert (Indexierung) oder eingefroren.
+// opts.cp (optional): Preisfaktor vom Tarifjahr bis year (Monte-Carlo-Pfad), sonst opts.inflation fest
 function tariffFor(year, opts) {
   const { y: base, v: p } = lawPick(LAW.tariff, year, opts.useDraft);
-  const idx = (year > base && opts.indexTariff) ? Math.pow(1 + opts.inflation, year - base) : 1;
+  const idx = (year > base && opts.indexTariff) ? (opts.cp ? opts.cp(base) : Math.pow(1 + opts.inflation, year - base)) : 1;
   return { p, idx };
 }
 

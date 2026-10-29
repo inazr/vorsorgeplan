@@ -34,11 +34,25 @@ function activeFundIndex(d, year) {
   return idx;
 }
 
+// Kursfaktor eines Fonds bis zum Zeitpunkt t (Jahresbruchteil), wie beim Kauf
+const fundGrowth = (f, R, t) => Math.pow(Math.max(0.01, 1 + R - f.ter), t);
+function depotValueAt(d, R, t) { let v = 0; for (const f of d.funds) v += fundValue(f) * fundGrowth(f, R, t); return v; }
+// Verkauf zum Zeitpunkt t: Kurs p0·(1+g)^t, Tranchen FIFO wie depotSell
+function depotSellAt(d, gross, mode, R, t) {
+  const p0 = d.funds.map(f => f.price);
+  d.funds.forEach(f => { f.price *= fundGrowth(f, R, t); });
+  const r = depotSell(d, gross, mode, false);
+  d.funds.forEach((f, i) => { f.price = p0[i]; });
+  return r;
+}
+
 // Ein Jahr Marktentwicklung + Sparrate + Ausschüttung + Vorabpauschale.
 // contrib wird zum mittleren Kaufzeitpunkt opts.buyT (Jahresbruchteil, 0,5 = gleichmäßig übers Jahr) investiert.
-// Liefert steuerrelevante Beträge (vor Teilfreistellung und Pauschbetrag).
+// opts.sell = { gross, mode, t } (oder eine Liste davon): Verkäufe zum Zeitpunkt t vor Kauf, Ausschüttung und Vorabpauschale.
+// Liefert steuerrelevante Beträge (vor Teilfreistellung und Pauschbetrag) und die verkauften Beträge sold.
 function depotYear(d, year, R, contrib, basiszins, opts) {
-  const out = { dist: 0, distTaxable: 0, vp: 0, vpTaxable: 0, contrib: 0 };
+  const out = { dist: 0, distTaxable: 0, vp: 0, vpTaxable: 0, contrib: 0, sold: 0 };
+  if (opts.sell) for (const s of [].concat(opts.sell)) if (s.gross > 0) out.sold += depotSellAt(d, s.gross, s.mode, R, s.t).sold;
   const act = activeFundIndex(d, year);
   let reinvest = 0;
   for (let i = 0; i < d.funds.length; i++) {
@@ -121,6 +135,61 @@ function depotSell(d, gross, mode, dry) {
   return { sold, gain, taxable };
 }
 
+// Verkaufskurve für viele Probeverkäufe im selben Jahr: kumulierte Werte V, Gewinne G und steuerpflichtige Gewinne T in Verkaufsreihenfolge.
+// Ein Teilverkauf einer Tranche ist linear, curveSell entspricht daher depotSell(…, dry = true).
+function sellCurve(d, mode) {
+  const V = [0], G = [0], T = [0];
+  for (const i of sellOrder(d, mode)) {
+    const f = d.funds[i];
+    for (const l of f.lots) {
+      const val = l.units * f.price; if (val <= 1e-9) continue;
+      const g = val - l.cost - l.vp, n = V.length - 1;
+      V.push(V[n] + val); G.push(G[n] + g); T.push(T[n] + g * (1 - f.tf));
+    }
+  }
+  return { V, G, T };
+}
+function curveSell(c, gross) {
+  const { V, G, T } = c, n = V.length - 1;
+  if (gross >= V[n]) return { sold: V[n], gain: G[n], taxable: T[n] };
+  let lo = 0, hi = n;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (V[m] <= gross) lo = m; else hi = m; }
+  const s = (gross - V[lo]) / (V[hi] - V[lo]);
+  return { sold: gross, gain: G[lo] + s * (G[hi] - G[lo]), taxable: T[lo] + s * (T[hi] - T[lo]) };
+}
+
+// ─── Mehrere Depots (ein ETF-Depot je Person) ───
+function depotsValue(ds) { let v = 0; for (const d of ds) v += depotValue(d); return v; }
+// Verkauf über alle Depots: Aufteilung nach Gewichten shares (Standard: Anteil am Depotwert), was ein Depot nicht hergibt, übernehmen die anderen.
+// cv: Verkaufskurven je Depot (sellCurve), liefern Depotwerte und beschleunigen Probeverkäufe. per: Ergebnis je Depot.
+function depotsSell(ds, gross, mode, dry, shares, cv) {
+  const v = cv ? cv.map(c => c.V[c.V.length - 1]) : ds.map(depotValue), w = shares || v, wSum = w.reduce((a, b) => a + b, 0);
+  const amt = ds.map((d, i) => Math.min(v[i], gross > 0 && wSum > 0 ? gross * w[i] / wSum : 0));
+  let rest = gross - amt.reduce((a, b) => a + b, 0);
+  for (let i = 0; i < ds.length && rest > 1e-9; i++) { const x = Math.min(rest, v[i] - amt[i]); if (x > 0) { amt[i] += x; rest -= x; } }
+  const out = { sold: 0, gain: 0, taxable: 0, per: [] };
+  ds.forEach((d, i) => {
+    const r = amt[i] <= 0 ? { sold: 0, gain: 0, taxable: 0 } : dry && cv ? curveSell(cv[i], amt[i]) : depotSell(d, amt[i], mode, dry);
+    out.sold += r.sold; out.gain += r.gain; out.taxable += r.taxable; out.per.push(r);
+  });
+  return out;
+}
+
+// Verkäufe eines Jahres zu ihrem Zeitpunkt (sells: [{ gross, t }], aufsteigend nach t) auf die Depots verteilen: nach Gewichten w (Probeverkauf zu Jahresbeginn),
+// gedeckelt auf den Depotwert zum Zeitpunkt t; was ein Depot nicht hergibt, übernehmen die anderen. Liefert je Depot die Liste [{ gross, t }].
+function depotsSellPlan(ds, R, sells, w) {
+  const v0 = ds.map(depotValue), rem = [...v0], wSum = w.reduce((a, b) => a + b, 0), plan = ds.map(() => []);
+  for (const { gross, t } of sells) {
+    if (!(gross > 0)) continue;
+    const f = ds.map((d, i) => v0[i] > 0 ? depotValueAt(d, R, t) / v0[i] : 0), cap = rem.map((r, i) => r * f[i]);
+    const amt = ds.map((d, i) => Math.min(cap[i], wSum > 0 ? gross * w[i] / wSum : 0));
+    let rest = gross - amt.reduce((a, b) => a + b, 0);
+    for (let i = 0; i < ds.length && rest > 1e-9; i++) { const x = Math.min(rest, cap[i] - amt[i]); if (x > 0) { amt[i] += x; rest -= x; } }
+    amt.forEach((a, i) => { if (a > 0) { plan[i].push({ gross: a, t }); rem[i] = Math.max(0, rem[i] - a / f[i]); } });
+  }
+  return plan;
+}
+
 // ═══════════════════════════════════════════════════════════════
 // ALTERSVORSORGEDEPOT (AltVRefG, ab 2027) je Person
 // Zwei Töpfe: gefördert (Eigenbeitrag bis 1.800 € + Zulagen, voll steuerpflichtig)
@@ -144,6 +213,13 @@ function avdSaveYear(a, R, cost, cF, cU, zul, buyT = 0.5) {
   a.uCost += cU;
 }
 function avdGrow(a, R, cost) { const g = R - cost; a.fv *= (1 + g); a.uv *= (1 + g); }
+// Auszahlung paid zur Mitte der Auszahlungsmonate (t Jahre): das Restkapital bekommt zusätzlich die Rendite g des Ausgezahlten bis t (nach Anteil der Töpfe)
+function avdPaidGain(a, g, paid, t) {
+  const tot = avdValue(a); if (!(paid > 0) || tot <= 0) return;
+  const x = paid * (Math.pow(Math.max(0.01, 1 + g), t) - 1);
+  a.fv += x * a.fv / tot; a.uv += x * a.uv / tot;
+}
+function avdGrowPaid(a, R, cost, paid, t) { avdGrow(a, R, cost); avdPaidGain(a, R - cost, paid, t); }
 
 // Hälftelung des ungeförderten Teils: § 22 Nr. 5 S. 2 c EStG verweist auf § 20 Abs. 1 Nr. 6 S. 2 (12 Jahre Laufzeit, ab 62)
 function avdHalf(a, payAbs, P) {

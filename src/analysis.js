@@ -20,7 +20,7 @@ function maxBy(ok, guess, tol = 0.5) {
   return lo;
 }
 
-// Höchstes reales Netto (heutige Kaufkraft), bei dem das Vermögen bis zum Zielalter reicht
+// Höchstes reales Netto (Kaufkraft 2026), bei dem das Vermögen bis zum Zielalter reicht
 // (bei der ewigen Rente zusätzlich real erhalten bleibt)
 function maxNet(I, A, scenario, path, guess) {
   return maxBy(n => { const s = simulate(I, A, { scenario, targetReal: n, path }); return !s.depleted && keepsCapital(I, s); }, guess);
@@ -142,13 +142,20 @@ function rng(seed) {
 }
 function gauss(r) { let u = 0, v = 0; while (u === 0) u = r(); v = r(); return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v); }
 
+// Inflation als AR(1) um A.inflation: infl_t = π + φ·(infl_{t−1} − π) + σ·√(1 − φ²)·ε, Start infl_{−1} = π (Schwankung σ bleibt die stationäre)
 function makePaths(n, years, A, seed) {
   const r = rng(seed);
   const mu = Math.log(1 + A.ret); // Median-Pfad = deterministische Rendite (geometrisch)
+  const phi = Math.min(0.95, Math.max(0, A.inflPhi ?? 0.6)), se = A.inflVol * Math.sqrt(1 - phi * phi);
   const paths = [];
   for (let k = 0; k < n; k++) {
     const p = [];
-    for (let t = 0; t < years; t++) p.push({ R: Math.exp(mu + A.vol * gauss(r)) - 1, infl: A.inflation + A.inflVol * gauss(r) });
+    let inf = A.inflation;
+    for (let t = 0; t < years; t++) {
+      const R = Math.exp(mu + A.vol * gauss(r)) - 1;
+      inf = A.inflation + phi * (inf - A.inflation) + se * gauss(r);
+      p.push({ R, infl: inf });
+    }
     paths.push(p);
   }
   return paths;
@@ -213,17 +220,17 @@ function irr(flows) {
 }
 
 // Zahlungen je Anlage aus den Jahreszeilen (simulate mit detail), Zahlungen zur Jahresmitte, Restwerte am Ende des letzten Jahres.
-// Vorsorgeprodukte je Person: eigene Beiträge (mit Zuzahlungen aus Erstattungen) raus; Auszahlungen abzüglich anteiliger
-// Einkommensteuer und KV, Kapitalauszahlung nach Steuer, Erstattungen (§ 10a, Basisrente) im Folgejahr und Restkapital rein.
+// Vorsorgeprodukte je Person: eigene Beiträge (mit Zuzahlungen aus Erstattungen) raus; Auszahlungen abzüglich Einkommensteuer
+// als Grenzsteuer (estBy, gestapelt GRV, AVD, Basisrente, private RV, mit Kirchensteuer der Person) und KV der Quelle, Kapitalauszahlung nach Steuer, Erstattungen (§ 10a, Basisrente) im Folgejahr und Restkapital rein.
 // Zulagen fließen ins Produkt und zählen daher nur über die Auszahlungen.
-// ETF-Depot gemeinsam: Startwert und Einzahlungen (Sparrate, Reinvestitionen) raus; Verkäufe nach Kapitalertragsteuer und KV
-// sowie der Restwert nach latenter Abgeltungsteuer rein. Je Person gilt dieselbe Rendite (Hälfte aller Zahlungen).
-// real: Zahlungen in heutiger Kaufkraft. Rückgabe { etf, avd, basis, prv }: je { per: [IRR je Person oder null], hh }.
+// ETF-Depots zusammen: Startwerte und Einzahlungen (Sparrate, Reinvestitionen) raus; Verkäufe nach Kapitalertragsteuer und KV
+// sowie der Restwert nach latenter Abgeltungsteuer rein. Je Person gilt die Rendite des Haushalts.
+// real: Zahlungen in Kaufkraft 2026. Rückgabe { etf, avd, basis, prv }: je { per: [IRR je Person oder null], hh }.
 function productIRR(sim, I, real) {
   const rows = sim.rows, last = rows[rows.length - 1], Y0 = I.startYear, tEnd = last.year - Y0 + 1;
   const d = (r, v) => real ? v / r.priceIdx : v;
   const out = {};
-  const etf = [{ t: 0, v: -I.depot.startValue }, { t: tEnd, v: d(last, last.etf - sim.etfTaxLatent) }];
+  const etf = [{ t: 0, v: -sum(I.persons.map(p => p.etf.startValue)) }, { t: tEnd, v: d(last, last.etf - sim.etfTaxLatent) }];
   for (const r of rows) etf.push({ t: r.year - Y0 + 0.5, v: d(r, r.etfSale - r.kapTax - r.etfContrib - sum(r.pp.map(p => p.kvBy?.etf || 0))) });
   const e = irr(etf);
   out.etf = { per: I.persons.map(() => e), hh: e };

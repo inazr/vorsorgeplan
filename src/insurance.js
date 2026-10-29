@@ -7,7 +7,7 @@
 //   vkKapital  Verwaltungskosten, % des gebildeten Kapitals pro Jahr
 //   ter        Fondskosten pro Jahr
 //   rk         Kosten der Rentenphase, % der Rente
-//   rf         Rentenfaktor: Monatsrente je 10.000 € Kapital bei Rentenbeginn
+//   rf         Rentenfaktor: Monatsrente je 10.000 € Kapital bei Rentenbeginn mit Alter rfAge (Standard 67), sonst über rfAt
 //   rentDyn    jährliche Rentensteigerung aus Überschüssen
 // ═══════════════════════════════════════════════════════════════
 const INS = {
@@ -15,7 +15,10 @@ const INS = {
   halfAge: 62, halfYears: 12,      // Hälftelung bei Kapitalauszahlung (§ 20 Abs. 1 Nr. 6 S. 2, § 52 Abs. 28 S. 7 EStG)
   fondsFrei: 0.15,                 // fondsgebundene Versicherung: 15 % des Unterschiedsbetrags steuerfrei (§ 20 Abs. 1 Nr. 6 S. 9)
   akvMonths: 60,                   // Abschlusskosten verteilt auf die ersten 5 Jahre (§ 169 Abs. 3 VVG)
-  kvLumpMonths: 120,               // Kapitalauszahlung: freiwillig Versicherte zahlen 10 Jahre lang auf 1/120 (Annahme analog § 229 SGB V)
+  // Sterbetafel (Annahme A): Gompertz-Näherung an DAV 2004 R, unisex. Modalalter M + trend · (Jahrgang − by0), Streuung b.
+  // Rechnungszins = Höchstrechnungszins 1,0 %. Nur für die Umrechnung des Rentenfaktors auf ein anderes Rentenbeginn-Alter.
+  mort: { M: 92, b: 8.5, trend: 0.1, by0: 1965, zins: 0.01 },
+  kvLumpMonths: 120,               // Kapitalauszahlung (private RV, AVD-Teilkapital), nur Monate ab Rentenbeginn: freiwillig Versicherte zahlen 10 Jahre lang auf 1/120 (Annahme analog § 229 SGB V)
 };
 // Versicherungsprodukte: Steuer der Rente (Besteuerungsanteil nach Kohorte § 22 Nr. 1 S. 3 a aa oder Ertragsanteil bb EStG),
 // Kapitaloption, Sonderausgabenabzug (§ 10 Abs. 1 Nr. 2 b EStG). Reihenfolge bleibt fest (Summen in dieser Reihenfolge).
@@ -29,8 +32,8 @@ const teilOf = (cfg, k) => POLICY_DEF[k].lump ? (cfg.mode === 'kapital' ? 1 : cf
 
 // Kostenvorlagen (typische Werte aus Muster-PIBs und Tarifvergleichen 2025/2026)
 const INS_PRESETS = {
-  provision: { akv: 0.025, vkBeitrag: 0.05, vkFix: 0, vkKapital: 0.005, ter: 0.002, rk: 0.015, rf: 27, rentDyn: 0.005 },
-  netto: { akv: 0, vkBeitrag: 0.015, vkFix: 36, vkKapital: 0.003, ter: 0.002, rk: 0.015, rf: 29, rentDyn: 0.005 },
+  provision: { akv: 0.025, vkBeitrag: 0.05, vkFix: 0, vkKapital: 0.005, ter: 0.002, rk: 0.015, rf: 27, rentDyn: 0.015 },
+  netto: { akv: 0, vkBeitrag: 0.015, vkFix: 36, vkKapital: 0.003, ter: 0.002, rk: 0.015, rf: 29, rentDyn: 0.015 },
 };
 
 // Ertragsanteil der Leibrente nach Alter bei Rentenbeginn (§ 22 Nr. 1 S. 3 a bb EStG), ab 50 Jahren
@@ -41,6 +44,19 @@ function ertragsanteil(age) {
   for (const [a, p] of ERTRAGSANTEIL) if (age >= a) v = p;
   return v / 100;
 }
+
+// Barwert einer monatlich vorschüssigen Leibrente von 1 €/Jahr ab Alter age (Jahrgang by), bis Alter 115
+function annuityDue(age, by) {
+  const { M, b, trend, by0, zins } = INS.mort, m = M + trend * (by - by0), c = Math.exp((age - m) / b);
+  let a = 0;
+  for (let k = 0, n = Math.round((115 - age) * 12); k < n; k++) {
+    const t = k / 12;
+    a += Math.exp(-c * (Math.exp(t / b) - 1)) * Math.pow(1 + zins, -t) / 12;
+  }
+  return a;
+}
+// Rentenfaktor für Rentenbeginn mit Alter age: der Faktor laut Angebot gilt für cfg.rfAge (Standard 67)
+const rfAt = (cfg, age, by) => cfg.rf * annuityDue(cfg.rfAge ?? 67, by) / annuityDue(age, by);
 
 function makePolicy() { return { K: 0, K0: 0, paid: 0, cost: 0, paying: false, rentM: 0, startY: null, lump: 0, gain: 0 }; }
 
@@ -58,12 +74,12 @@ function policySaveYear(pol, cfg, R, { c, cM, z, alphaY, feeM, mG }) {
 }
 
 // Rentenbeginn: Kapital in eine lebenslange Monatsrente umwandeln (teil = ausgezahlter Kapitalanteil)
-function policyAnnuitize(pol, cfg, year, teil = 0) {
+function policyAnnuitize(pol, cfg, year, teil = 0, rf = cfg.rf) {
   const share = Math.min(1, Math.max(0, teil));
   pol.K0 = pol.K;   // Kapital bei Rentenbeginn (für die Charts)
   pol.lump = pol.K * share;
   pol.gain = Math.max(0, pol.K - pol.paid) * share;   // Ertragsanteil der Kapitalauszahlung (Beiträge anteilig angerechnet)
-  pol.rentM = pol.K * (1 - share) / 10000 * cfg.rf;
+  pol.rentM = pol.K * (1 - share) / 10000 * rf;
   pol.K = 0; pol.paying = true; pol.startY = year;
 }
 // Rentenzahlung im Jahr für m Monate (nach Kosten der Rentenphase)

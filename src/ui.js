@@ -21,6 +21,8 @@ function setP(path, v) { const ks = path.split('.'); const last = ks.pop(); cons
 const idOf = p => 'f-' + p.replace(/\./g, '-');
 
 // ─── Feld-Bausteine ───
+// Regelaltersgrenze als Text, z. B. „66 Jahre 4 Monate“
+function ragLabel(by) { const m = ragMonths(by), j = Math.floor(m / 12), r = m % 12; return j + ' Jahre' + (r ? ' ' + r + ' Monate' : ''); }
 function F(path, label, o = {}) {
   const v = getP(path);
   const t = o.t || 'num';
@@ -66,10 +68,11 @@ const ORDER_WEALTH = ['avd', 'etf', 'basis', 'prv'], ORDER_SAVE = ['prv', 'etf',
 const fact = (l, v) => `<div class="fact"><div class="l">${l}</div><div class="v">${v}</div></div>`;
 const FUND_C = ['--s1', '--s2', '--s3', '--s4', '--s5'];
 const dv = (r, v) => chartReal ? v / r.priceIdx : v;
-const realLabel = () => chartReal ? 'in heutiger Kaufkraft' : 'nominal';
+const realLabel = () => chartReal ? 'in Kaufkraft 2026' : 'nominal';
 const commit = () => { save(); renderPanels(); scheduleRecalc(); };
 // Fingerabdruck ohne Produkt-Einstellungen: ändert er sich, ist das Optimum veraltet
-function optSig() { const I = clone(ST.I); I.persons.forEach(p => PK.forEach(k => delete p[k])); return JSON.stringify([I, ST.A, ST.A.optMode, ST.A.optQ]); }
+const EI = () => effI(ST.I);   // wirksame Eingaben (ohne Person 2, wenn abgeschaltet): für Rechnung und Darstellung
+function optSig() { const I = EI(); I.persons.forEach(p => PK.forEach(k => delete p[k])); return JSON.stringify([I, ST.A, ST.A.optMode, ST.A.optQ]); }
 const simOf = k => R && R['sim' + k];
 const prodUsed = (p, k) => p[k]?.on && (k === 'avd' ? p.avd.eigen + p.avd.extra > 0 : p[k].beitrag > 0);
 const prodList = I => PK.filter(k => I.persons.some(p => prodUsed(p, k)));
@@ -97,7 +100,8 @@ function onField(el, isChange) {
 function scheduleRecalc() { clearTimeout(recalcT); recalcT = setTimeout(recalc, 250); }
 
 function recalc() {
-  const { I, A } = ST;
+  const I = EI(), { A } = ST;
+  if (chartPerson >= I.persons.length) chartPerson = -1;
   const out = {};
   if (OPT) out.IO = applyPatch(I, OPT.patch);
   if (I.withdraw.strategy !== 'fixedNet') {
@@ -118,7 +122,7 @@ function recalc() {
 // ─── Kennzahlen im Kopf ───
 function rowAt(sim, y) { return sim.rows.find(r => r.year === y); }
 function renderKPIs() {
-  const { I } = ST;
+  const I = EI();
   const ws = R.simB.wStartYear;
   const wealth = k => { const r = rowAt(simOf(k), ws - 1); return r ? r.netWorth / r.priceIdx : 0; };
   const stale = OPT && OPT.sig !== optSig();
@@ -132,7 +136,7 @@ function renderKPIs() {
   let html = '';
   if (I.withdraw.strategy !== 'fixedNet') {
     const perp = I.withdraw.strategy === 'perpetual';
-    const sub = perp ? 'Kapital bleibt real erhalten' : 'Netto in heutiger Kaufkraft';
+    const sub = perp ? 'Kapital bleibt real erhalten' : 'Netto in Kaufkraft 2026';
     // Bestes Ergebnis: bei fester Rendite nach Netto, nach einem Monte-Carlo-Lauf nach dem Perzentil
     const mcRun = OPT && OPT.info.mode === 'mc' && !stale;
     const nets = mcRun ? { A: OPT.info.pctA, B: OPT.info.pctB, O: OPT.info.pct } : { A: R.netA, B: R.netB, ...(OPT ? { O: R.netO } : {}) };
@@ -150,7 +154,7 @@ function renderKPIs() {
     html += kpi('Kapital reicht · ' + SCN.B, reach('B'), rsub('B'), 's2', true);
     html += OPT ? kpi('Kapital reicht · ' + SCN.O, reach('O'), rsub('O') + ' · ' + optSub(), 's1') : kpi(SCN.O, '–', optSub(), 's1');
   }
-  html += kpi('Nettovermögen bei Entnahmestart ' + ws, keur(wealth('B')), 'deine Aufteilung · ' + keur(wealth('A')) + ' nur ETF' + (OPT ? ' · ' + keur(wealth('O')) + ' Optimum' : '') + ', heutige Kaufkraft');
+  html += kpi('Nettovermögen bei Entnahmestart ' + ws, keur(wealth('B')), 'deine Aufteilung · ' + keur(wealth('A')) + ' nur ETF' + (OPT ? ' · ' + keur(wealth('O')) + ' Optimum' : '') + ', Kaufkraft 2026');
   $('#kpis').innerHTML = html;
 }
 // Kurzbeschreibung einer Produkt-Aufteilung
@@ -161,6 +165,8 @@ function optLabel(patch) {
 function kpi(l, v, d, sw, b) { return `<div class="kpi${b ? ' b' : ''}"><div class="l">${sw ? `<span class="sw" style="background:var(--${sw})"></span>` : ''}${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`; }
 
 // ═══ Reiter 1: Haushalt ═══
+// Zusatz "+ KiSt" in den Steuerbezeichnungen, wenn eine Person Kirchensteuer zahlt
+function kLab() { return EI().persons.some(p => p.kist > 0) ? ' + KiSt' : ''; }
 function personCard(i) {
   const P = ST.I.persons[i], b = `I.persons.${i}`;
   const job = P.job === 'employee';
@@ -171,29 +177,38 @@ function personCard(i) {
       ${S(b + '.job', 'Erwerbsart', [['employee', 'Angestellt'], ['self', 'Selbständig']], { rr: 1 })}
       ${S(b + '.bm', 'Geburtsmonat', monOpts)}
       ${F(b + '.by', 'Geburtsjahr', { t: 'int', min: 1950, max: 2005 })}
-      ${F(b + '.income', 'Bruttogehalt / Gewinn ' + ST.I.startYear, { t: 'eur', step: 1000 })}
+      ${F(b + '.income', 'Bruttogehalt / Gewinn 2026', { t: 'eur', step: 1000 })}
       ${F(b + '.incomeGrowth', 'Einkommen steigt pro Jahr um', { t: 'pct' })}
-      ${F(b + '.retireAge', 'Renteneintritt mit', { t: 'int', u: 'Jahren', min: 63, max: 70, h: 'Regelaltersgrenze 67. Früher: 0,3 % Abschlag je Monat. Später: 0,5 % Zuschlag.' })}
+      ${S(b + '.kist', 'Kirchensteuer', [[0, 'keine'], [0.08, '8 % (BY, BW)'], [0.09, '9 %']], { h: 'Auf die Einkommensteuer (nach Kinderfreibetrag) und über die Abgeltungsteuer auf Kapitalerträge. Bei Zusammenveranlagung nach Anteil am steuerpflichtigen Einkommen.' })}
+      ${F(b + '.retireAge', 'Renteneintritt mit', { t: 'int', u: 'Jahren', min: 63, max: 70, h: `Regelaltersgrenze ${ragLabel(P.by)}. Früher: 0,3 % Abschlag je Monat. Später: 0,5 % Zuschlag.` })}
     </div>
     <h3>Gesetzliche Rente</h3>
     <div class="fields">
       ${S(b + '.grvMode', 'Berechnung', [['prognose', 'Prognose aus Renteninfo'], ['ep', 'Entgeltpunkte bisher']], { rr: 1 })}
       ${P.grvMode === 'prognose'
         ? F(b + '.grvPrognose', 'Prognose laut Renteninfo', { t: 'eur', u: '€/Monat', step: 10 }) + F(b + '.grvRwInfo', 'Rentenwert zum Ausstellungsdatum', { t: 'num', step: 0.01, u: '€', h: Object.keys(SV.rw).sort().map(y => `Ab 1.7.${y}: ${SV.rw[y].toLocaleString('de-DE', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €.`).join(' ') })
-        : F(b + '.epNow', 'Entgeltpunkte bisher', { t: 'num', step: 0.1, h: 'Steht in der Renteninfo. Kindererziehungszeiten sind dort schon enthalten.' }) + `<div class="f">${C(b + '.rvPflicht', 'Zahlt weiter Pflichtbeiträge')}</div>`}
+        : F(b + '.epNow', 'Entgeltpunkte bisher', { t: 'num', step: 0.1, h: 'Steht in der Renteninfo. Kindererziehungszeiten sind nur bis zu deren Stand enthalten, spätere kommen aus den Kindern dazu.' }) + `<div class="f">${C(b + '.rvPflicht', 'Zahlt weiter Pflichtbeiträge')}</div>`}
+      ${S(b + '.riM', 'Stand der Renteninfo, Monat', monOpts)}
+      ${F(b + '.riY', 'Stand der Renteninfo, Jahr', { t: 'int', h: 'Beitrags-EP (EP-Modus) und Erziehungszeiten danach rechnet der Plan hinzu, davor stecken sie in den Entgeltpunkten bisher.' })}
     </div>
     <h3>Krankenversicherung im Alter</h3>
     <div class="fields three">
       ${S(b + '.kvdr', 'Status im Alter', [['auto', 'Gesetzlich, automatisch prüfen'], ['ja', 'Gesetzlich, KVdR (pflicht)'], ['nein', 'Gesetzlich, freiwillig'], ['pkv', 'Privat (PKV)']], { rr: 1 })}
       ${P.kvdr === 'pkv' ? `
-      ${F(b + '.pkvPremium', 'PKV-Beitrag heute inkl. PV', { t: 'eur', u: '€/Monat', step: 10 })}
+      ${F(b + '.pkvPremium', 'PKV-Beitrag 2026 inkl. PV', { t: 'eur', u: '€/Monat', step: 10 })}
       ${F(b + '.pkvGrowth', 'Beitrag steigt pro Jahr um', { t: 'pct', h: 'PKV langfristig etwa 3 %' })}
-      ${F(b + '.pkvRelief', 'Entlastung ab Rente (heute)', { t: 'eur', u: '€/Monat', step: 10, h: 'Wegfall Krankentagegeld, Entlastungstarif' })}
+      ${F(b + '.pkvRelief', 'Entlastung ab Rente (Preise 2026)', { t: 'eur', u: '€/Monat', step: 10, h: 'Wegfall Krankentagegeld, Entlastungstarif' })}
       ${F(b + '.pkvBasis', 'Abziehbarer Basisanteil', { t: 'pct', step: 1 })}` : `
       ${F(b + '.firstWork', 'Erste Erwerbstätigkeit', { t: 'int', min: 1980, max: 2030 })}
       ${F(b + '.pkvYearsSecondHalf', 'Jahre privat versichert', { t: 'num', step: 0.5, u: 'J.', h: 'Nur in der zweiten Hälfte des Erwerbslebens' })}`}
     </div>
     ${C(b + '.krankengeld', 'Mit Anspruch auf Krankengeld')}
+    <h3>ETF-Depot</h3>
+    <div class="fields three">
+      ${F(b + '.etf.startValue', 'ETF-Depot zu Rechnungsbeginn', { t: 'eur', step: 1000 })}
+      ${F(b + '.etf.startCost', 'davon Einstandswert', { t: 'eur', step: 1000, h: 'Kaufpreis aller Anteile. Bestimmt die Steuer beim Verkauf.' })}
+      ${F(b + '.etf.freistellung', 'Freistellungsauftrag', { t: 'eur', u: '€/Jahr', step: 100, min: 0, max: LAW.sparerPB, h: `Verheiratet zusammen höchstens ${eur(LAW.sparerPB)}, sonst je Person ${eur(LAW.sparerPB / 2)}` })}
+    </div>
     <div class="facts" id="facts-${i}"></div>
   </div>`;
 }
@@ -225,11 +240,11 @@ function loanCard(k) {
 function renderP0() {
   const I = ST.I;
   $('#p0').innerHTML = `
-  <div class="grid">${personCard(0)}${personCard(1)}</div>
+  <div class="grid">${personCard(0)}${ST.I.person2On ? personCard(1) : ''}</div>
   <div class="card">
     <div class="card-h"><h2>Sparbudget und Hauskredit</h2></div>
     <div class="fields three">
-      ${F('I.budget.monthly', 'Gesamtbudget pro Monat', { t: 'eur', step: 50, h: 'Kreditraten, Sondertilgungen und alle Sparraten' })}
+      ${F('I.budget.monthly', 'Gesamtbudget pro Monat (Preise 2026)', { t: 'eur', step: 50, h: 'Kreditraten, Sondertilgungen und alle Sparraten; wächst ab 2026 mit der Budget-Dynamik' })}
       ${F('I.budget.dyn', 'Budget steigt pro Jahr um', { t: 'pct', h: 'Unabhängig von der Gehaltssteigerung in den Personenkarten' })}
       ${S('I.saveUntil', 'Sparen bis', [['first', 'Erster Rentenbeginn'], ['last', 'Letzter Rentenbeginn']])}
     </div>
@@ -242,10 +257,11 @@ function renderP0() {
     <div class="card">
       <div class="card-h"><h2>Vermögen und Kinder</h2></div>
       <div class="fields">
-        ${F('I.depot.startValue', 'ETF-Depots heute (Summe)', { t: 'eur', step: 1000 })}
-        ${F('I.depot.startCost', 'davon Einstandswert', { t: 'eur', step: 1000, h: 'Kaufpreis aller Anteile. Bestimmt die Steuer beim Verkauf.' })}
         ${F('I.startYear', 'Rechnung startet', { t: 'int', min: 2026, max: 2030, rr: 1 })}
+        <div class="f"><label>&nbsp;</label>${C('I.person2On', 'Person 2 im Haushalt', { rr: 1 })}</div>
+        ${I.person2On ? `<div class="f"><label>&nbsp;</label>${C('I.married', 'Verheiratet / eingetragene Lebenspartnerschaft', { rr: 1 })}</div>` : ''}
       </div>
+      <p class="note">${I.person2On ? '' : 'Ohne Person 2: Einzelperson im Grundtarif; mit Kindern gilt der Entlastungsbetrag für Alleinerziehende (§ 24b EStG: 4.260 € plus 240 € je weiteres Kind, je Monat mit Kindergeld ein Zwölftel). Die Eingaben von Person 2 bleiben gespeichert. '}Verheiratet: Zusammenveranlagung mit Splitting, gemeinsamem Sparerpauschbetrag, Verlustverrechnung und Höchstbetrag der Basisrente. Sonst Einzelveranlagung je Person (Grundtarif, Soli, Sparerpauschbetrag, Höchstbetrag und § 10a-Günstigerprüfung je Person; die Kinderzulage folgt dem Kindergeld). Der Splittingvorteil der Erwerbsphase ist nicht eingerechnet (festes Sparbudget, die Lohnsteuer wirkt nicht auf die Sparrate); unverheiratet kann deshalb ein höheres Netto erscheinen.</p>
       <div class="card-h"><h3>Kinder</h3><button class="btn" id="btn-kid-add">Kind hinzufügen</button></div>
       ${I.children.map((c, k) => `<div class="fund">
         <div class="fund-h"><span style="flex:1">${esc(c.name)}</span><button class="btn" data-kid-del="${k}">Entfernen</button></div>
@@ -254,12 +270,14 @@ function renderP0() {
           ${S(`I.children.${k}.bm`, 'Geburtsmonat', monOpts)}
           ${F(`I.children.${k}.by`, 'Geburtsjahr', { t: 'int' })}
           ${S(`I.children.${k}.kgUntil`, 'Kindergeld bis Alter', [[18, '18 Jahre'], [25, '25 Jahre (Ausbildung)']])}
-          ${S(`I.children.${k}.zulageTo`, 'Kinderzulage an', I.persons.map((p, i) => [i, p.name]))}
+          ${I.married && I.person2On ? S(`I.children.${k}.zulageTo`, 'Kinderzulage an', EI().persons.map((p, i) => [i, p.name])) : `<div class="f"><label>Kinderzulage an</label><div class="h">folgt dem Kindergeld (§ 85 Abs. 1 EStG)</div></div>`}
+          ${S(`I.children.${k}.kgTo`, 'Kindergeld an', EI().persons.map((p, i) => [i, p.name]))}
+          ${I.person2On ? S(`I.children.${k}.kezTo`, 'Erziehungszeit bei', EI().persons.map((p, i) => [i, p.name]), { h: '36 Monate je Kind (Geburten ab 1992), ca. 1 EP je Jahr. Im EP-Modus gekappt an der Beitragsbemessungsgrenze, im Prognose-Modus ohne Kappung.' }) : ''}
         </div></div>`).join('')}
-      <p class="note">Kinder zählen für Kinderfreibetrag und Kindergeld, die Kinderzulage im Altersvorsorgedepot (300 € je Kind, solange Kindergeld fließt), den Abschlag in der Pflegeversicherung ab dem 2. Kind unter 25 und die 9/10-Regel (3 Jahre je Kind). Die Kinderzulage braucht beim jeweiligen Elternteil mindestens so viel Eigenbeitrag, wie sie hoch ist. Ab 2028 folgt sie gesetzlich dem Kindergeldbezug, wenn ihr nichts anderes erklärt. Die Frühstart-Rente ist nicht eingerechnet.</p>
+      <p class="note">Kinder zählen für Kinderfreibetrag und Kindergeld, die Kinderzulage im Altersvorsorgedepot (300 € je Kind, solange Kindergeld fließt), den Abschlag in der Pflegeversicherung ab dem 2. Kind unter 25 und die 9/10-Regel (3 Jahre je Kind). Die Kinderzulage braucht beim jeweiligen Elternteil mindestens so viel Eigenbeitrag, wie sie hoch ist. Ab 2028 folgt sie gesetzlich dem Kindergeldbezug, wenn ihr nichts anderes erklärt. Ohne Trauschein bekommt jeder Elternteil den halben Kinderfreibetrag, die Günstigerprüfung rechnet je Elternteil mit dem halben Kindergeld (§ 31 S. 4 EStG), egal wer es bezieht. Das Kindergeld selbst zählt nicht zum Netto. Die Frühstart-Rente ist nicht eingerechnet.</p>
     </div>
   </div>`;
-  $('#btn-kid-add').onclick = () => { ST.I.children.push({ name: 'Kind ' + (ST.I.children.length + 1), by: 2027, bm: 1, kgUntil: 18, zulageTo: 1 }); commit(); };
+  $('#btn-kid-add').onclick = () => { ST.I.children.push({ name: 'Kind ' + (ST.I.children.length + 1), by: 2027, bm: 1, kgUntil: 18, zulageTo: 0, kgTo: 0, kezTo: 0 }); commit(); };
   $$('[data-kid-del]').forEach(b => b.onclick = () => { ST.I.children.splice(+b.dataset.kidDel, 1); commit(); });
   $('#btn-loan-add').onclick = () => {
     const y = Math.max(ST.I.startYear, 2026);
@@ -270,7 +288,7 @@ function renderP0() {
   if ($('#btn-be')) $('#btn-be').onclick = () => {
     const b = $('#btn-be'); b.disabled = true; $('#be-out').textContent = 'rechnet…';
     setTimeout(() => {
-      const r = houseBreakEven(ST.I, ST.A, 'B');
+      const r = houseBreakEven(EI(), ST.A, 'B');
       b.disabled = false;
       $('#be-out').innerHTML = r.rate == null ? 'Die Ablösung aus dem Depot ist auch bei 0 % Zins besser.' : r.rate === Infinity ? 'Die Anschlussfinanzierung ist bis 15 % Zins besser.' : `Die Anschlussfinanzierung lohnt sich bis <b class="num">${pc(r.rate, 2)}</b> Zins (beide Darlehen). Darüber ist die Ablösung aus dem Depot besser.`;
     }, 30);
@@ -278,7 +296,7 @@ function renderP0() {
 }
 
 function renderFacts() {
-  const I = ST.I;
+  const I = EI();
   factsPersons(I); factsLoans(I); factsLoanInfo(I); factsAvd(I); factsPolicies(I); factsBudget(I); factsFunds(I); factsRefund();
 }
 // Rentenfakten je Person (Reiter Haushalt)
@@ -297,11 +315,11 @@ function factsPersons(I) {
       ['Steuerpflichtiger Anteil', pc(LAW.besteuerungsanteil(y))],
       ['Entgeltpunkte', epTot.toLocaleString('de-DE', { maximumFractionDigits: 1 })],
       ['Rente brutto ' + (row?.year ?? ''), eur(monthly) + '/M.'],
-      ['in heutiger Kaufkraft', eur(row ? monthly / row.priceIdx : 0) + '/M.'],
+      ['in Kaufkraft 2026', eur(row ? monthly / row.priceIdx : 0) + '/M.'],
     ].map(([l, v]) => fact(l, v)).join('')
       + `<div class="fact" style="grid-column:1/-1"><div class="l">Krankenversicherung im Alter</div><div class="v">${kv.pkv
         ? (() => { const rr = R.simB.rows.find(r => r.year > y) || row; const kvm = rr ? rr.pp[i].kv / 12 : 0;
-            return `<span class="pill info">Privat · keine Beiträge auf Kapitalerträge</span> <span class="muted" style="font-family:var(--font-ui);font-size:11px">Eigenanteil ${rr?.year ?? ''} nach Zuschuss der Rentenversicherung: ${eur(kvm)}/M., heutige Kaufkraft ${eur(rr ? kvm / rr.priceIdx : 0)}/M.</span>`; })()
+            return `<span class="pill info">Privat · keine Beiträge auf Kapitalerträge</span> <span class="muted" style="font-family:var(--font-ui);font-size:11px">Eigenanteil ${rr?.year ?? ''} nach Zuschuss der Rentenversicherung: ${eur(kvm)}/M., Kaufkraft 2026 ${eur(rr ? kvm / rr.priceIdx : 0)}/M.</span>`; })()
         : kv.ok
         ? `<span class="pill good">KVdR · keine Beiträge auf Depot-Erträge</span>`
         : `<span class="pill warn">Freiwillig · Beiträge auch auf Kapitalerträge und Altersvorsorgedepot</span>`}${kv.auto ? ` <span class="muted" style="font-family:var(--font-ui);font-size:11px">9/10-Regel: ${kv.have.toFixed(1)} von nötigen ${kv.need.toFixed(1)} Jahren</span>` : ''}</div></div>`;
@@ -337,7 +355,7 @@ function factsAvd(I) {
     const a = P.avd;
     const cF = Math.min(a.eigen, AVD.fMax);
     const nowY = Math.max(ST.I.startYear, 2027);
-    const zk = I.children.filter(c => c.zulageTo === i && nowY - c.by <= c.kgUntil).length;
+    const zk = I.children.filter(c => zulageOf(I, c) === i && nowY - c.by <= c.kgUntil).length;
     const zul = zulageGrund(cF, AVD) + (zk > 0 && cF >= AVD.minEigen ? Math.min(cF, AVD.kindMax * zk) : 0);
     const startRow = R.simB.rows.find(r => r.avdPay[i] > 0);
     const before = startRow ? R.simB.rows.find(r => r.year === startRow.year - 1) : null;
@@ -357,13 +375,13 @@ function factsPolicies(I) {
     if (!st) { el.innerHTML = ''; return; }
     const y0 = Math.floor(st.s0 / 12), r0 = R.simB.rows.find(r => r.year === y0) || R.simB.rows[R.simB.rows.length - 1];
     const teil = teilOf(cfg, k);
-    const cap = st.lump + (cfg.rf > 0 ? st.rentM * 10000 / cfg.rf : 0);
+    const cap = st.K0;   // Kapital bei Rentenbeginn (Kapitalanteil + verrentet)
     const rent = st.rentM * (1 - cfg.rk);
     const eff = policyEffCost(cfg, P.by + cfg.payStart - I.startYear, ST.A.ret);
     const tot = key => sum(R.simB.rows.map(r => r.pp[i][key] || 0));
     const items = [
-      ['Kapital bei Rentenbeginn ' + y0 + ' (heute)', keur(cap / r0.priceIdx)],
-      [teil < 1 ? 'Erste Rente (heutige Kaufkraft)' : 'Kapitalauszahlung', teil < 1 ? eur(rent / r0.priceIdx) + '/M.' : keur(st.lump / r0.priceIdx)],
+      ['Kapital bei Rentenbeginn ' + y0 + ' (Kaufkraft 2026)', keur(cap / r0.priceIdx)],
+      [teil < 1 ? 'Erste Rente (Kaufkraft 2026)' : 'Kapitalauszahlung', teil < 1 ? eur(rent / r0.priceIdx) + '/M.' : keur(st.lump / r0.priceIdx)],
       ['Effektivkosten', eff ? pc(eff.eff, 2).replace(' %', ' Pp.') : '–'],
       ['Kosten bis Rentenbeginn', keur(st.cost)],
     ];
@@ -400,7 +418,7 @@ function factsFunds(I) {
 function factsRefund() {
   const rf = $('#refund-info'); if (!rf) return;
   const sv = R.simB;
-  rf.innerHTML = `Bis zum Rentenbeginn bekommt ihr <b class="num">${keur(sv.sumZulagen)}</b> Zulagen und <b class="num">${keur(sv.sumRefunds)}</b> zusätzliche Steuererstattung aus dem Sonderausgabenabzug (nominal). Die Erstattung kommt im Folgejahr und fließt wie in der Karte eingestellt. Kapital in heutiger Kaufkraft.`;
+  rf.innerHTML = `Bis zum Rentenbeginn bekommt ihr <b class="num">${keur(sv.sumZulagen)}</b> Zulagen und <b class="num">${keur(sv.sumRefunds)}</b> zusätzliche Steuererstattung aus dem Sonderausgabenabzug (nominal). Die Erstattung kommt im Folgejahr und fließt wie in der Karte eingestellt. Kapital in Kaufkraft 2026.`;
 }
 
 // ═══ Reiter 2: Strategie ═══
@@ -432,9 +450,10 @@ function costFields(b, cfg) {
       ${F(b + '.vkFix', 'Verwaltungskosten fest', { t: 'eur', u: '€/Jahr', step: 6, h: 'In der Ansparphase' })}
       ${F(b + '.vkKapital', 'Verwaltungskosten Kapital', { t: 'pct', step: 0.05, h: '% des gebildeten Kapitals pro Jahr' })}
       ${F(b + '.ter', 'Fondskosten (TER)', { t: 'pct', step: 0.05, h: 'ETF etwa 0,2 %, aktive Fonds 1,5 %' })}
-      ${F(b + '.rk', 'Kosten Rentenphase', { t: 'pct', step: 0.1, h: '% jeder Rente' })}
-      ${F(b + '.rf', 'Rentenfaktor', { t: 'num', step: 0.5, u: '€ je 10.000 €', h: 'Monatsrente je 10.000 € Kapital. Garantiert meist 24 bis 29 €.' })}
-      ${F(b + '.rentDyn', 'Rentensteigerung', { t: 'pct', step: 0.1, h: 'pro Jahr aus Überschüssen, nicht garantiert' })}
+      ${F(b + '.rk', 'Kosten Rentenphase', { t: 'pct', step: 0.1, h: 'Zusätzlich zum Rentenfaktor abgezogen (PIB: Verwaltungskosten in der Auszahlungsphase)' })}
+      ${F(b + '.rf', 'Rentenfaktor', { t: 'num', step: 0.5, u: '€ je 10.000 €', h: 'Rentenfaktor laut Angebot, vor Kosten der Rentenphase. Monatsrente je 10.000 € Kapital, meist 24 bis 29 €.' })}
+      ${F(b + '.rfAge', 'Rentenfaktor gilt für Alter', { t: 'int', min: 60, max: 75, h: 'Bei anderem Rentenbeginn wird er über eine Sterbetafel umgerechnet' })}
+      ${F(b + '.rentDyn', 'Rentensteigerung', { t: 'pct', step: 0.1, h: 'aus Überschüssen, nicht garantiert' })}
     </div>`;
 }
 function basisCard(i) {
@@ -485,10 +504,13 @@ function legalTable() {
     ['Einkommensteuer', `Tarif 2026, Grundfreibetrag ${eur(t26.gfb)}`, 'G', '§ 32a EStG', 'https://www.gesetze-im-internet.de/estg/__32a.html'],
     ['Einkommensteuer', `Tarif 2027/2028, Grundfreibetrag ${n(t27.gfb)} / ${eur(t28.gfb)}`, 'E', 'BT-Drs. 21/8235', 'https://dserver.bundestag.de/btd/21/082/2108235.pdf'],
     ['Einkommensteuer', 'ab 2029 mit Inflation fortgeschrieben (Schalter)', 'A', 'Annahme', ''],
-    ['Solidaritätszuschlag', `Freigrenze ${eur(LAW.soli.freigrenzeSplit)} (Splitting), Milderung ${pc(LAW.soli.milderung)}`, 'G', '§§ 3, 4 SolZG', 'https://www.gesetze-im-internet.de/solzg_1995/__3.html'],
-    ['Kinder', `Kinderfreibetrag ${eur(k26.kfb)}, Kindergeld ${eur(k26.kg)} (2026)`, 'G', '§§ 32, 66 EStG', 'https://www.gesetze-im-internet.de/estg/__32.html'],
+    ['Solidaritätszuschlag', `Freigrenze ${eur(LAW.soli.freigrenzeSplit)} (Splitting), je Person bei Einzelveranlagung die Hälfte, Milderung ${pc(LAW.soli.milderung)}`, 'G', '§§ 3, 4 SolZG', 'https://www.gesetze-im-internet.de/solzg_1995/__3.html'],
+    ['Alleinerziehende', `Entlastungsbetrag ${eur(LAW.eb24b[2026].v)} plus ${eur(LAW.eb24b[2026].plus)} je weiteres Kind, nur ohne Person 2 (je Monat mit Kindergeld ein Zwölftel)`, 'G', '§ 24b EStG', 'https://www.gesetze-im-internet.de/estg/__24b.html'],
+    ['Kinder', `Kinderfreibetrag ${eur(k26.kfb)}, Kindergeld ${eur(k26.kg)} (2026), unverheiratet je Elternteil die Hälfte (§ 31 S. 4)`, 'G', '§§ 32, 66 EStG', 'https://www.gesetze-im-internet.de/estg/__32.html'],
     ['Rentenbesteuerung', 'Besteuerungsanteil +0,5 Pp. je Jahrgang, 100 % ab 2058', 'G', '§ 22 Nr. 1 EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
-    ['Kapitalerträge', `Abgeltungsteuer ${pc(LAW.abgSt * (1 + LAW.soliKap), 3)}, Sparerpauschbetrag ${eur(LAW.sparerPB)}`, 'G', '§§ 20, 32d EStG', 'https://www.gesetze-im-internet.de/estg/__32d.html'],
+    ['Kirchensteuer', `8 % (Bayern, Baden-Württemberg) oder 9 % auf die Einkommensteuer nach Kinderfreibetrag, als Sonderausgabe abziehbar; auf Kapitalerträge Abgeltungsteuer ${pc(kapRate(0.09), 3)} (9 %) bzw. ${pc(kapRate(0.08), 3)} (8 %)`, 'G', '§ 51a EStG, § 32d Abs. 1 S. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__51a.html'],
+    ['Kirchensteuer', 'Vereinfacht: Sonderausgabenabzug im selben Jahr, glaubensverschiedene Ehe nach Anteil an den Einkünften statt Verhältnis der Grundtarif-Steuern, kein besonderes Kirchgeld, keine Kappung', 'A', 'Annahme', ''],
+    ['Kapitalerträge', `Abgeltungsteuer ${pc(LAW.abgSt * (1 + LAW.soliKap), 3)}, Sparerpauschbetrag ${eur(LAW.sparerPB / 2)} je Person bei Einzelveranlagung, zusammen veranlagt ${eur(LAW.sparerPB)}`, 'G', '§§ 20, 32d EStG', 'https://www.gesetze-im-internet.de/estg/__32d.html'],
     ['Investmentsteuer', `Teilfreistellung 30 %, Vorabpauschale mit Basiszins ${pc(LAW.basiszins[2026] / 100, 2)} (2026)`, 'G', '§§ 18-20 InvStG', 'https://www.gesetze-im-internet.de/invstg_2018/__18.html'],
     ['Altersvorsorgedepot', `Grundzulage ${pc(AVD.g1, 0)} bis ${eur(AVD.g1Cap)}, ${pc(AVD.g2, 0)} bis ${eur(AVD.fMax)} (max. ${eur(zulMax)})`, 'G', '§ 84 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
     ['Altersvorsorgedepot', `Kinderzulage bis ${eur(AVD.kindMax)}, Mindesteigenbeitrag ${eur(AVD.minEigen)}`, 'G', '§§ 85, 86 EStG n. F.', 'https://www.recht.bund.de/bgbl/1/2026/156/VO.html'],
@@ -498,20 +520,22 @@ function legalTable() {
     ['Altersvorsorgedepot', 'Geförderter Teil voll steuerpflichtig, ungeförderter Teil nur der Ertrag, nach 12 Jahren und ab 62 zur Hälfte; keine Vorabpauschale beim Sparen', 'G', '§ 22 Nr. 5 S. 2 c EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Altersvorsorgedepot', 'KVdR beitragsfrei, freiwillig Versicherte zahlen Beiträge', 'G', '§§ 237, 229 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__237.html'],
     ['Basisrente', `Höchstbetrag ${eur(hb(2026))} je Person (2026), gemeinsam bei Zusammenveranlagung, minus Beiträge zur GRV (AN- und AG-Anteil, Selbständige voller Beitrag)`, 'G', '§ 10 Abs. 1 Nr. 2 b, Abs. 3 EStG', 'https://www.gesetze-im-internet.de/estg/__10.html'],
+    ['Basisrente, private RV', `Rentenfaktor bei anderem Rentenbeginn über Sterbetafel (Gompertz-Näherung an DAV 2004 R, unisex, Modalalter ${INS.mort.M}) und Rechnungszins ${pc(INS.mort.zins, 1)}`, 'A', 'Annahme', ''],
     ['Basisrente', `Höchstbetrag 2027: ${eur(hb(2027))} (knappschaftliche BBG ${eur(lawPick(SV.bbgKn, 2027).v)} × ${pc(lawPick(SV.rvSatz, 2027).v + SV.knAufschlag)})`, 'E', 'SV-Rechengrößenverordnung 2027', ''],
     ['Basisrente', `Rente frühestens ab ${INS.basisMinAge}, Besteuerung wie gesetzliche Rente`, 'G', '§ 22 Nr. 1 S. 3 a aa EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Basisrente, private RV', 'Kostenarten wie im Produktinformationsblatt', 'G', '§ 2a AltZertG, AltvPIBV', 'https://www.gesetze-im-internet.de/altzertg/__2a.html'],
     ['Private Rentenversicherung', `Rente mit Ertragsanteil (${pc(ertragsanteil(SV.rentenAlter), 0)} bei Beginn mit ${SV.rentenAlter})`, 'G', '§ 22 Nr. 1 S. 3 a bb EStG', 'https://www.gesetze-im-internet.de/estg/__22.html'],
     ['Private Rentenversicherung', `Kapital: ${pc(INS.fondsFrei, 0)} des Ertrags steuerfrei (fondsgebunden), ab ${INS.halfAge} und nach ${INS.halfYears} Jahren die Hälfte mit persönlichem Steuersatz, sonst Abgeltungsteuer`, 'G', '§ 20 Abs. 1 Nr. 6 EStG', 'https://www.gesetze-im-internet.de/estg/__20.html'],
     ['Krankenversicherung', 'Basisrente und private RV in der KVdR beitragsfrei, freiwillig Versicherte zahlen auf die volle Rente', 'G', '§ 240 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__240.html'],
-    ['Krankenversicherung', `Kapitalauszahlung bei freiwillig Versicherten: 1/${INS.kvLumpMonths} über ${INS.kvLumpMonths / 12} Jahre`, 'A', 'Annahme analog § 229 SGB V', ''],
+    ['Krankenversicherung', `Kapitalauszahlung (private RV, AVD-Teilkapital) bei freiwillig Versicherten: 1/${INS.kvLumpMonths} über ${INS.kvLumpMonths / 12} Jahre, nur Monate ab Rentenbeginn`, 'A', 'Annahme analog § 229 SGB V', ''],
     ['Rentenversicherung', `Rentenwert ${rw} ab 1.7.2026, BBG 2026 ${eur(lawPick(SV.bbgRV, 2026).v)}`, 'G', 'SGB VI, RV-Rechengrößen', 'https://www.deutsche-rentenversicherung.de/'],
     ['Rentenversicherung', `BBG 2027 ${eur(lawPick(SV.bbgRV, 2027).v)}`, 'E', 'SV-Rechengrößenverordnung 2027 (Kabinett 7.10.2026)', ''],
     ['Rentenversicherung', `Beitragssatz ${rs(2026)} (2026)`, 'G', '§ 158 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__158.html'],
     ['Rentenversicherung', `Beitragssatz 2027 ${rs(2027)}`, 'E', 'SV-Rechengrößen 2027 (Kabinett 7.10.2026)', ''],
     ['Rentenversicherung', `Beitragssatz ab 2028 ${rs(2028)} (Vorausschätzung)`, 'A', 'DRV, Bundesvertreterversammlung 11.6.2026', 'https://www.deutsche-rentenversicherung.de/DRV/DE/Ueber-uns-und-Presse/Presse/Pressemitteilungen/Pressemitteilungen-aktuell/2026/2026-06-11-bvv-gunkel.html'],
     ['Rentenversicherung', `Haltelinie 48 % bis ${SV.halteBis}, danach Dämpfung (Schalter)`, 'G', 'Rentenpaket 2025', ''],
-    ['Rentenversicherung', `Regelaltersgrenze ${SV.rentenAlter}, Abschlag 0,3 % je Monat`, 'G', '§§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__77.html'],
+    ['Rentenversicherung', `Regelaltersgrenze nach Jahrgang (ab 1964: ${SV.rentenAlter}), Abschlag 0,3 % je Monat`, 'G', '§ 235 SGB VI, §§ 35, 77 SGB VI', 'https://www.gesetze-im-internet.de/sgb_6/__235.html'],
+    ['Einkommensteuer', `Altersentlastungsbetrag ab 65: ${pc(LAW.altEntl(2026).pct)} (max. ${eur(LAW.altEntl(2026).max)}) für Jahrgang 1961, sinkt um 0,4 Pp je Jahrgang`, 'G', '§ 24a EStG', 'https://www.gesetze-im-internet.de/estg/__24a.html'],
     ['Krankenversicherung', `BBG 2026 ${eur(lawPick(SV.bbgKV, 2026).v)}, Zusatzbeitrag Ø ${pc(ASSUME.zusatz)}`, 'G', 'SGB V, BStabG', ''],
     ['Krankenversicherung', `BBG 2027 ${eur(lawPick(SV.bbgKV, 2027).v)} (inkl. Sonderanhebung)`, 'E', 'SV-Rechengrößenverordnung 2027 (Kabinett 7.10.2026)', ''],
     ['Krankenversicherung', 'KVdR über 9/10-Regel, freiwillige GKV zählt, 3 Jahre je Kind', 'G', '§ 5 Abs. 1 Nr. 11 SGB V', 'https://www.gesetze-im-internet.de/sgb_5/__5.html'],
@@ -530,10 +554,10 @@ function renderP1() {
     <div class="card-h"><h2>So verteilt sich dein Budget</h2><span class="muted" id="budget-sub"></span></div>
     <div class="tablebox" id="budget-tbl"></div>
   </div>
-  <div class="grid">${avdCard(0)}${avdCard(1)}</div>
+  <div class="grid">${avdCard(0)}${ST.I.person2On ? avdCard(1) : ''}</div>
   <div class="note" id="refund-info"></div>
-  <div class="grid">${basisCard(0)}${basisCard(1)}</div>
-  <div class="grid">${prvCard(0)}${prvCard(1)}</div>
+  <div class="grid">${basisCard(0)}${ST.I.person2On ? basisCard(1) : ''}</div>
+  <div class="grid">${prvCard(0)}${ST.I.person2On ? prvCard(1) : ''}</div>
   <p class="note">Renten aus Basisrente und privater Rentenversicherung laufen lebenslang. Der Rechner rechnet wie überall bis zum Zielalter. Dass die Rente auch darüber hinaus gezahlt wird, und dass das Kapital mit Rentenbeginn nicht mehr vererbbar ist, bewertet er nicht. Das Versicherungskapital zählt bis zum Rentenbeginn zum Vermögen.</p>
   <div class="card">
     <div class="card-h"><h2>Beste Aufteilung suchen</h2><div class="row"><button class="btn primary" id="btn-opt">Optimierer starten</button><button class="btn" id="btn-opt-stop" hidden>Abbrechen</button></div></div>
@@ -541,7 +565,7 @@ function renderP1() {
       ${S('A.optMode', 'Verfahren', [['fast', 'Schnell (feste Rendite)'], ['mc', 'Monte Carlo (50 Verläufe)']], { rr: 1, h: ST.A.optMode === 'mc' ? 'Verfeinert das schnelle Optimum, dauert etwa eine halbe bis zwei Minuten' : 'Dauert wenige Sekunden' })}
       ${ST.A.optMode === 'mc' ? S('A.optQ', 'Ziel', [[0.1, 'Netto, das in 90 % der Verläufe reicht'], [0.25, 'Netto, das in 75 % der Verläufe reicht'], [0.5, 'Typischer Verlauf (50 %)']]) : ''}
     </div>
-    <p class="muted" style="margin:0">Probiert für beide Personen aus, wie viel in Altersvorsorgedepot, Basisrente und private Rentenversicherung fließt, und deren Auszahlungsoptionen. Der Rest geht ins ETF-Depot. Kosten bleiben wie eingetragen. Ziel ist das höchste Netto in heutiger Kaufkraft.</p>
+    <p class="muted" style="margin:0">Probiert für beide Personen aus, wie viel in Altersvorsorgedepot, Basisrente und private Rentenversicherung fließt, und deren Auszahlungsoptionen. Der Rest geht ins ETF-Depot. Kosten bleiben wie eingetragen. Ziel ist das höchste Netto in Kaufkraft 2026.</p>
     <div class="progress"><div id="opt-bar"></div></div>
     <div id="opt-out"></div>
   </div>
@@ -552,7 +576,7 @@ function renderP1() {
         ${S('I.depot.nFunds', 'Anzahl Sparpläne', [[1, '1'], [2, '2'], [3, '3'], [4, '4'], [5, '5']], { rr: 1 })}
         ${S('I.depot.sellMode', 'Verkaufen zuerst aus', [['newestFirst', 'zuletzt bespartem Fonds'], ['inOrder', 'Fonds 1, 2, 3 …']])}
         <div class="f"><label>&nbsp;</label>${C('I.depot.divRedirect', 'Ausschüttungen in aktuellen Sparplan')}</div>
-        ${F('I.depot.freistellung', 'Freistellungsauftrag', { t: 'eur', u: '€/Jahr', step: 100, min: 0, max: 2000, h: 'Für dieses Depot genutzter Sparerpauschbetrag, Paare höchstens 2.000 €' })}
+        ${ST.I.person2On ? F('I.depot.share', 'Sparrate an ' + esc(ST.I.persons[0].name), { t: 'pct', step: 5, min: 0, max: 100, h: `Anteil am ETF-Sparplan und an Überschüssen im Ruhestand, den Rest bekommt ${esc(ST.I.persons[1].name)}` }) : ''}
       </div>
       <p class="note">Die Staffelung nutzt FIFO. Wer im Alter zuerst den jüngsten Fonds verkauft, versteuert anfangs wenig Gewinn. Das verschiebt Steuern nach hinten.</p>
       <div id="fund-issues"></div>
@@ -563,13 +587,13 @@ function renderP1() {
       <div class="fields">
         ${S('I.withdraw.strategy', 'Strategie', [['realConst', 'Höchstes gleichbleibendes Netto'], ['perpetual', 'Ewige Rente (Kapital bleibt erhalten)'], ['fixedNet', 'Wunsch-Netto vorgeben']], { rr: 1 })}
         ${F('I.withdraw.targetAge', W.strategy === 'perpetual' ? 'Kapital prüfen bis Alter' : 'Geld soll reichen bis Alter', { t: 'int', min: 80, max: 105 })}
-        ${S('I.withdraw.refPerson', 'Alter von', I.persons.map((p, i) => [i, p.name]))}
-        ${W.strategy === 'fixedNet' ? F('I.withdraw.fixedNet', 'Wunsch-Netto heute', { t: 'eur', u: '€/Monat', step: 100 }) + `<div class="f"><label>&nbsp;</label>${C('I.withdraw.fixedIndexed', 'Mit Inflation anpassen')}</div>` : ''}
+        ${S('I.withdraw.refPerson', 'Alter von', EI().persons.map((p, i) => [i, p.name]))}
+        ${W.strategy === 'fixedNet' ? F('I.withdraw.fixedNet', 'Wunsch-Netto (Preise 2026)', { t: 'eur', u: '€/Monat', step: 100 }) + `<div class="f"><label>&nbsp;</label>${C('I.withdraw.fixedIndexed', 'Mit Inflation anpassen')}</div>` : ''}
       </div>
-      <p class="note">Netto heißt hier: gesetzliche Renten, Auszahlungen aus dem Altersvorsorgedepot und Verkäufe aus dem ETF-Depot, abzüglich Einkommensteuer, Soli, Kapitalertragsteuer und eigener Kranken- und Pflegeversicherung. Die Entnahme beginnt, wenn beide in Rente sind.${W.strategy === 'perpetual' ? ' <b>Ewige Rente:</b> Das Netto ist so gewählt, dass das Nettovermögen (ETF-Depot und Altersvorsorgedepot) im gewählten Alter in heutiger Kaufkraft mindestens so hoch ist wie zu Entnahmebeginn. Das Altersvorsorgedepot wird per Auszahlungsplan verbraucht, das ETF-Depot muss das ausgleichen.' : ''}</p>
+      <p class="note">Netto heißt hier: gesetzliche Renten, Auszahlungen aus dem Altersvorsorgedepot und Verkäufe aus dem ETF-Depot, abzüglich Einkommensteuer, Soli, Kapitalertragsteuer und eigener Kranken- und Pflegeversicherung. Die Entnahme beginnt, wenn beide in Rente sind.${W.strategy === 'perpetual' ? ' <b>Ewige Rente:</b> Das Netto ist so gewählt, dass das Nettovermögen (ETF-Depot und Altersvorsorgedepot, dazu Versicherungen, die bis dahin nicht verrentet werden) im gewählten Alter in Kaufkraft 2026 mindestens so hoch ist wie zu Entnahmebeginn. Das Altersvorsorgedepot wird per Auszahlungsplan verbraucht, das ETF-Depot muss das ausgleichen.' : ''}</p>
       <h3>Annahmen</h3>
       <div class="fields">
-        ${F('A.ret', 'Rendite Aktien pro Jahr', { t: 'pct', h: 'Vor Fondskosten. Gilt als typischer Verlauf (Median).' })}
+        ${F('A.ret', 'Rendite Aktien pro Jahr', { t: 'pct', h: 'Nominal, vor Fondskosten. Gilt als typischer Verlauf (Median).' })}
         ${F('A.inflation', 'Inflation', { t: 'pct' })}
         ${F('A.wageGrowth', 'Lohnwachstum', { t: 'pct', h: 'Treibt Rentenwert, BBG und Durchschnittsentgelt' })}
         ${F('A.rentenDaempfung', `Rentendämpfung ab ${SV.halteBis + 1}`, { t: 'pct', step: 0.05, h: 'Rentenanpassung = Lohnwachstum minus Dämpfung' })}
@@ -607,7 +631,7 @@ function syncFunds() {
 // Prüft Sparzeiträume: Überschneidungen, nie besparte Fonds, Lücken
 function fundIssues(I) {
   const F = I.depot.funds, out = [];
-  const end = Math.floor((I.saveUntil === 'last' ? Math.max(...I.persons.map(retireStartAbs)) : Math.min(...I.persons.map(retireStartAbs))) / 12);
+  const ps = I.person2On ? I.persons : [I.persons[0]], end = Math.floor((I.saveUntil === 'last' ? Math.max(...ps.map(retireStartAbs)) : Math.min(...ps.map(retireStartAbs))) / 12);
   F.forEach((f, k) => { if (!(f.from <= f.to)) out.push(`Fonds ${k + 1}: Beginn liegt nach dem Ende.`); });
   const who = [];
   for (let y = I.startYear; y <= end; y++) {
@@ -628,7 +652,7 @@ function fundIssues(I) {
 function autoSplit() {
   const I = ST.I, D = I.depot;
   syncFunds();
-  const end = Math.floor(Math.min(...I.persons.map(retireStartAbs)) / 12);
+  const end = Math.floor(Math.min(...(I.person2On ? I.persons : [I.persons[0]]).map(retireStartAbs)) / 12);
   const span = end - I.startYear + 1, n = D.funds.length;
   D.funds.forEach((f, k) => { f.from = I.startYear + Math.round(span * k / n); f.to = k === n - 1 ? end : I.startYear + Math.round(span * (k + 1) / n) - 1; });
 }
@@ -642,7 +666,7 @@ function optFmt(k, v) {
 function runOptimizer() {
   const b = $('#btn-opt'); b.disabled = true; $('#btn-opt-stop').hidden = false;
   const mode = ST.A.optMode, q = ST.A.optQ;
-  OPT_RUN = optimize(ST.I, ST.A, { mode, q }, (p, n, phase) => {
+  OPT_RUN = optimize(EI(), ST.A, { mode, q }, (p, n, phase) => {
     $('#opt-bar').style.width = (p * 100).toFixed(0) + '%';
     $('#opt-out').innerHTML = `<p class="muted">${phase}: bisher bestes ${phase === 'Monte Carlo' ? `Netto in ${pc(1 - q, 0)} der Verläufe` : 'Netto'} <b class="num">${eur(n)}</b>/Monat</p>`;
   }, (best, n, info) => {
@@ -653,9 +677,10 @@ function runOptimizer() {
 }
 function renderOptResult() {
   const el = $('#opt-out'); if (!el || !OPT || !R) return;
-  const P = ST.I.persons, stale = OPT.sig !== optSig();
+  const P = EI().persons, stale = OPT.sig !== optSig();
   const rows = [];
   P.forEach((p, i) => PK.forEach(k => {
+    if (!OPT.patch[i]) return;
     const cur = p[k], opt = OPT.patch[i][k];
     const uC = prodUsed(p, k), uO = prodUsed({ [k]: opt }, k);
     // Beiträge zeigen, wenn eines von beiden das Produkt nutzt, Auszahlungsoptionen nur für das genutzte Optimum
@@ -675,21 +700,21 @@ function renderOptResult() {
 
 // ═══ Reiter 3: Entwicklung ═══
 function renderP2() {
-  const names = ST.I.persons.map(p => p.name);
+  const names = EI().persons.map(p => p.name);
   $('#p2').innerHTML = `
   <div class="row">
     <span class="muted">Details für</span>
     <div class="seg" id="seg-scen">${['A', 'B', 'O'].map(k => `<button data-v="${k}" aria-pressed="${chartScen === k}"${k === 'O' && !OPT ? ' disabled title="Erst den Optimierer im Reiter Strategie starten"' : ''}>${SCN[k]}</button>`).join('')}</div>
     <div class="seg" id="seg-person"><button data-v="-1" aria-pressed="${chartPerson === -1}">Haushalt</button>${names.map((n, i) => `<button data-v="${i}" aria-pressed="${chartPerson === i}">${esc(n)}</button>`).join('')}</div>
     <span class="spacer"></span>
-    <div class="seg" id="seg-real"><button data-v="1" aria-pressed="${chartReal}">Heutige Kaufkraft</button><button data-v="0" aria-pressed="${!chartReal}">Nominal</button></div>
+    <div class="seg" id="seg-real"><button data-v="1" aria-pressed="${chartReal}">Kaufkraft 2026</button><button data-v="0" aria-pressed="${!chartReal}">Nominal</button></div>
   </div>
   <div class="card">
     <div class="card-h"><h2>Wer bringt was in den Ruhestand</h2><span class="muted" id="who-sub"></span></div>
     <div class="tablebox" id="who"></div>
-    <p class="muted" style="margin:0;font-size:12px">Die Einkommensteuer wird bei Zusammenveranlagung gemeinsam festgesetzt. Hier wird sie nach dem Anteil am steuerpflichtigen Einkommen verteilt. Das gemeinsame ETF-Depot, die Kapitalertragsteuer und der Kredit zählen je zur Hälfte.</p>
+    <p class="muted" style="margin:0;font-size:12px">Die Einkommensteuer wird bei Zusammenveranlagung gemeinsam festgesetzt. Hier wird sie nach dem Anteil am steuerpflichtigen Einkommen verteilt. Jede Person hat ihr eigenes ETF-Depot mit eigener Kapitalertragsteuer, der Kredit zählt je zur Hälfte.</p>
   </div>
-  <div class="card"><div class="card-h"><h2>Rendite je Anlage<span class="infotip" tabindex="0" aria-label="Methode">i<span class="tip" role="tooltip"><b>Interner Zinsfuß (IRR):</b> die jährliche Verzinsung, bei der alle Zahlungen einer Anlage zusammen 0 ergeben. Sie berücksichtigt, wann und wie viel eingezahlt wird. <b>Eingezahlt:</b> eigene Beiträge, beim ETF-Depot Startwert, Sparraten und reinvestierte Auszahlungen. <b>Zurück:</b> Auszahlungen nach Einkommensteuer und Kranken- und Pflegeversicherung, Steuererstattungen (§ 10a, Basisrente) und das Restkapital zum Zielalter, beim ETF-Depot nach Abgeltungsteuer. Zulagen erhöhen die Rendite über die Auszahlungen. Die Einkommensteuer wird nach dem Anteil am steuerpflichtigen Einkommen verteilt (Durchschnitts-, nicht Grenzsteuersatz). Renten zählen bis zum Zielalter: Wer länger lebt, erzielt mit Renten eine höhere Rendite.</span></span></h2><span class="muted" id="irr-sub"></span></div><div class="chart sm" id="ch-irr" role="img" aria-label="Rendite je Anlage und Person"></div></div>
+  <div class="card"><div class="card-h"><h2>Rendite je Anlage<span class="infotip" tabindex="0" aria-label="Methode">i<span class="tip" role="tooltip"><b>Interner Zinsfuß (IRR):</b> die jährliche Verzinsung, bei der alle Zahlungen einer Anlage zusammen 0 ergeben. Sie berücksichtigt, wann und wie viel eingezahlt wird. <b>Eingezahlt:</b> eigene Beiträge, beim ETF-Depot Startwert, Sparraten und reinvestierte Auszahlungen. <b>Zurück:</b> Auszahlungen nach Einkommensteuer und Kranken- und Pflegeversicherung, Steuererstattungen (§ 10a, Basisrente) und das Restkapital zum Zielalter, beim ETF-Depot nach Abgeltungsteuer. Zulagen erhöhen die Rendite über die Auszahlungen. Die Einkommensteuer je Produkt ist der Grenzsteuerbetrag, gestapelt über dem Erwerbseinkommen in der Reihenfolge gesetzliche Rente, AVD, Basisrente, private RV. Renten zählen bis zum Zielalter: Wer länger lebt, erzielt mit Renten eine höhere Rendite.</span></span></h2><span class="muted" id="irr-sub"></span></div><div class="chart sm" id="ch-irr" role="img" aria-label="Rendite je Anlage und Person"></div></div>
   <div class="card"><div class="card-h"><h2>Vermögen<span class="infotip" tabindex="0" aria-label="Hinweis">i<span class="tip" role="tooltip"><b>Verrentung:</b> Basisrente und private Rentenversicherung werden bei Rentenbeginn verrentet. Das Kapital geht an den Versicherer und wird zu einer lebenslangen Rente. Es lässt sich danach nicht mehr entnehmen oder vererben und fällt deshalb im Vermögen auf 0. Die Rente steht im Chart „Einkommen im Ruhestand“. Ein Kapitalanteil der privaten RV fließt nach Steuern ins ETF-Depot. Das Altersvorsorgedepot läuft dagegen als Auszahlplan und bleibt bis zum Planende dein Vermögen.</span></span></h2><span class="muted" id="wealth-sub"></span></div><div class="chart" id="ch-wealth" role="img" aria-label="Vermögensverlauf"></div></div>
   <div class="card"><div class="card-h"><h2>Kapital je ETF-Sparplan</h2><span class="muted" id="funds-sub"></span></div><div class="chart" id="ch-funds" role="img" aria-label="Kapital je ETF-Sparplan"></div></div>
   ${PK.map(k => `<div class="card" hidden><div class="card-h"><h2>${PROD[k].name}</h2><span class="muted" id="prod-sub-${k}"></span></div><div class="chart" id="ch-prod-${k}" role="img" aria-label="Kapital ${PROD[k].inl} je Person"></div></div>`).join('')}
@@ -704,7 +729,7 @@ function renderP2() {
   <div class="card">
     <div class="card-h"><h2>Monte Carlo: Wie sicher ist das Netto?</h2>
       <div class="row">${S('A.mcRuns', 'Läufe', [[100, '100'], [200, '200'], [500, '500']])}<button class="btn primary" id="btn-mc" style="align-self:flex-end">Simulation starten</button></div></div>
-    <p class="muted" style="margin:0">Zufällige Renditen und Inflation je Jahr. Für jeden Verlauf wird das höchste Netto bestimmt, das bis zum Zielalter reicht. Nur ETF, deine Aufteilung und das Optimum laufen auf denselben Verläufen. Die Werte gelten für den ganzen Haushalt.</p>
+    <p class="muted" style="margin:0">Zufällige Renditen (nominal, unabhängig von der Inflation) und Inflation je Jahr. Die Inflation schwankt um den eingestellten Wert, Abweichungen klingen langsam ab (Autokorrelation ${String(ST.A.inflPhi).replace('.', ',')}). Steuertarif, Kindergeld, Einkommen, Sparbudget und PKV-Beitrag folgen der Inflation des Verlaufs, Löhne, Beitragsgrenzen und Rentenwert mit festem Abstand (Lohnwachstum minus Inflation). Für jeden Verlauf wird das höchste Netto bestimmt, das bis zum Zielalter reicht. Nur ETF, deine Aufteilung und das Optimum laufen auf denselben Verläufen. Die Werte gelten für den ganzen Haushalt.</p>
     <div class="progress"><div id="mc-bar"></div></div>
     <div id="mc-out"></div>
     <div class="grid"><div class="chart sm" id="ch-mc-dist" role="img" aria-label="Verteilung des Nettos"></div><div class="chart sm" id="ch-mc-fan" role="img" aria-label="Bandbreite des Vermögens"></div></div>
@@ -724,7 +749,7 @@ function V(r, k, who = chartPerson) {
   if (PERS_ARR.includes(k)) return sum(r[k]);
   switch (k) {
     case 'zul': return r.zulagen;
-    case 'est': return r.est + r.soli;
+    case 'est': return r.est + r.soli + r.kist;
     default: return r[k];
   }
 }
@@ -761,7 +786,7 @@ function renderWho(sim, irr) {
   const ws = sim.wFullYear;
   const r = sim.rows.find(x => x.year === ws), rb = sim.rows.find(x => x.year === sim.wStartYear - 1);
   if (!r) { $('#who').innerHTML = ''; return; }
-  const P = ST.I.persons, n = P.length;
+  const P = EI().persons, n = P.length;
   const m = v => eur(dv(r, v) / 12);
   const save = sim.rows.filter(x => x.saveMonths > 0);
   const tot = (k, who) => sum(save.map(x => V(x, k, who)));
@@ -777,13 +802,13 @@ function renderWho(sim, irr) {
     ['Gesetzliche Rente', who => m(V(r, 'grv', who)), true],
     ...pk.map(k => [PROD[k].name, who => m(V(r, k + 'Pay', who))]),
     ['ETF-Verkauf', who => m(V(r, 'etfSale', who))],
-    ['Einkommensteuer + Soli', who => '−' + m(V(r, 'est', who))],
+    ['Einkommensteuer + Soli' + kLab(), who => '−' + m(V(r, 'est', who))],
     ['Kapitalertragsteuer', who => '−' + m(V(r, 'kapTax', who))],
     ['Kranken- und Pflegeversicherung', who => '−' + m(V(r, 'kv', who))],
     ['Netto pro Monat', who => '<b>' + m(V(r, 'net', who)) + '</b>', true],
     ...['etf', ...pk].map((k, j) => ['Rendite ' + (k === 'etf' ? 'ETF-Depot' : PROD[k].inl) + (j ? '' : ' (IRR)'), who => { const x = who < 0 ? irr[k].hh : irr[k].per[who]; return x == null ? '–' : pc(x); }, !j]),
   ];
-  $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'heutige Kaufkraft' : 'nominal'} · Summen der Sparphase nominal · Rendite bis Zielalter ${chartReal ? 'real' : 'nominal'}`;
+  $('#who-sub').textContent = `${SCN[chartScen]} · erstes volles Entnahmejahr ${ws} · ${chartReal ? 'Kaufkraft 2026' : 'nominal'} · Summen der Sparphase nominal · Rendite bis Zielalter ${chartReal ? 'real' : 'nominal'}`;
   $('#who').innerHTML = `<table><thead><tr><th></th>${cols.map(c => `<th>${c < 0 ? 'Haushalt' : esc(P[c].name)}</th>`).join('')}</tr></thead><tbody>${lines.map(([l, f, sub]) => `<tr${sub ? ' style="border-top:2px solid var(--line-2)"' : ''}><td class="txt">${l}</td>${cols.map(c => `<td>${f(c)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
 }
 // Einheitlicher Stil: Flächen mit dünner Kante und geringer Deckkraft, Summenlinien 2 px, Entnahmestart als gestrichelte Linie
@@ -802,10 +827,10 @@ function chartCtx() {
   const PC = { grv: col['--s1'], etf: col['--s3'], ...Object.fromEntries(PK.map(k => [k, cssv(PROD[k].color)])) };
   const er = sim.rows.filter(r => r.wMonths > 0);   // Monatswerte der Entnahmemonate; angebrochene Jahre sind an der Achse markiert
   return {
-    sim, PC, er, irr: productIRR(sim, ST.I, chartReal), others: ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k)),
+    sim, PC, er, irr: productIRR(sim, EI(), chartReal), others: ['A', 'B', 'O'].filter(k => k !== chartScen && simOf(k)),
     C1: col['--s1'], C3: col['--s3'], C5: col['--s5'], C6: col['--s6'], C8: col['--s8'], CA: col['--sA'], ink: col['--ink'], surf: col['--surface'],
     years: sim.rows.map(r => r.year), ws: sim.wStartYear,
-    who: chartPerson >= 0 ? ST.I.persons[chartPerson].name : 'Haushalt',
+    who: chartPerson >= 0 ? EI().persons[chartPerson].name : 'Haushalt',
     scC: k => cssv(SCN_C[k]),
     m: (r, v) => dv(r, v) / r.wMonths,
     wYear: r => r.wMonths < 12 ? `${r.year} (${r.wMonths} Mon.)` : r.year,
@@ -813,7 +838,7 @@ function chartCtx() {
 }
 // Rendite je Anlage (IRR) je Person und Haushalt, Produkte in den festen Farben
 function chartIRR(c) {
-  const { irr, PC, surf } = c, P = ST.I.persons;
+  const { irr, PC, surf } = c, P = EI().persons;
   const ks = ORDER_WEALTH.filter(k => irr[k].hh != null);
   $('#irr-sub').textContent = `${SCN[chartScen]} · bis Zielalter ${ST.I.withdraw.targetAge} · nach Steuern und KV · ${chartReal ? 'real' : 'nominal'}`;
   chartOf('ch-irr').setOption(baseOpt({
@@ -828,7 +853,7 @@ function chartIRR(c) {
 // das Jahr eines Rentenbeginns kommt doppelt vor: knapp davor mit dem Kapital bei Rentenbeginn (pre), dann mit dem Jahresendwert.
 // Datenpunkte als [y, x] mit encode, denn ECharts stapelt die erste Zahlenspalte.
 const yearPts = (sim, starts) => sim.rows.flatMap(r => starts.includes(r.year) ? [{ r, x: r.year - 1e-6, pre: true }, { r, x: r.year }] : [{ r, x: r.year }]);
-// Kapital bei Rentenbeginn in heutiger Kaufkraft: Preisindex zum Monat des Rentenbeginns (Jahresendwerte nutzen den Index ihres Jahres)
+// Kapital bei Rentenbeginn in Kaufkraft 2026: Preisindex zum Monat des Rentenbeginns (Jahresendwerte nutzen den Index ihres Jahres)
 function dvK0(sim, r, q) {
   if (!chartReal) return q.K0;
   const prev = sim.rows.find(x => x.year === r.year - 1);
@@ -841,7 +866,7 @@ const yearAxis = pts => ({
 });
 function chartWealth(c) {
   const { sim, PC, others, scC } = c;
-  const idx = chartPerson >= 0 ? [chartPerson] : ST.I.persons.map((_, i) => i);
+  const idx = chartPerson >= 0 ? [chartPerson] : EI().persons.map((_, i) => i);
   const pts = yearPts(sim, idx.flatMap(i => POLICIES.map(k => sim.pol[i][k]?.startY)).filter(Boolean));
   // Kapital der Verträge, die in diesem Jahr verrentet werden (nur am Punkt vor dem Abfall)
   const k0 = (p, k) => p.pre ? sum(idx.map(i => sim.pol[i][k]?.startY === p.r.year ? dvK0(sim, p.r, sim.pol[i][k]) : 0)) : 0;
@@ -849,7 +874,7 @@ function chartWealth(c) {
   chartOf('ch-wealth').setOption(baseOpt({
     ...yearAxis(pts),
     series: [
-      ...ORDER_WEALTH.flatMap(k => k === 'etf' ? [{ ...area(chartPerson >= 0 ? 'ETF-Depot (Hälfte)' : 'ETF-Depot', null, PC.etf, 'w'), ...xy(pts, p => w(p, 'etf')) }]
+      ...ORDER_WEALTH.flatMap(k => k === 'etf' ? [{ ...area('ETF-Depot', null, PC.etf, 'w'), ...xy(pts, p => w(p, 'etf')) }]
         : on(sim, k) ? [{ ...area(PROD[k].chart, null, PC[k], 'w'), ...xy(pts, p => w(p, k)) }] : []),
       ...(sim.rows.some(r => r.debt > 0) ? [{ ...area('Restschuld Haus', null, c.C8, 'd'), ...xy(pts, p => -w(p, 'debt')) }] : []),
       { ...total('Nettovermögen', null, c.ink, wLine(c.ws)), ...xy(pts, p => w(p, 'netWorth') + sum(POLICIES.map(k => k0(p, k)))) },
@@ -861,9 +886,8 @@ function chartWealth(c) {
 function chartFunds(c) {
   const { sim } = c;
   const FC = FUND_C.map(cssv);
-  const share = chartPerson >= 0 ? 1 / ST.I.persons.length : 1;
-  const fundsCfg = ST.I.depot.funds;
-  $('#funds-sub').textContent = `${c.who} · ${chartPerson >= 0 ? 'Hälfte des gemeinsamen Depots · ' : ''}${realLabel()}`;
+  const fundsCfg = ST.I.depot.funds, fv = r => chartPerson >= 0 ? r.pp[chartPerson].funds : r.funds;
+  $('#funds-sub').textContent = `${c.who} · ${realLabel()}`;
   chartOf('ch-funds').setOption(baseOpt({
     xAxis: { ...baseOpt().xAxis, data: c.years },
     tooltip: { ...baseOpt().tooltip, formatter: ps => {
@@ -871,13 +895,13 @@ function chartFunds(c) {
       const tot = vis.reduce((a, p) => a + p.value, 0);
       return vis.length ? tip(ps[0].axisValue, [...tipSeries(vis), tipRow('Summe', tot, true)]) : `<b>${ps[0].axisValue}</b><br>Depot leer`;
     } },
-    series: [...fundsCfg.map((f, k) => area(f.name, sim.rows.map(r => dv(r, (r.funds[k] || 0) * share)), FC[k], 'f')),
-      total('Summe', sim.rows.map(r => dv(r, sum(r.funds) * share)), c.ink, wLine(c.ws))],
+    series: [...fundsCfg.map((f, k) => area(f.name, sim.rows.map(r => dv(r, fv(r)[k] || 0)), FC[k], 'f')),
+      total('Summe', sim.rows.map(r => dv(r, sum(fv(r)))), c.ink, wLine(c.ws))],
   }), true);
 }
 // Je Vorsorgeprodukt ein Chart: Kapital je Person (Flächen) und Einzahlungen (Linie); ungenutzte Produkte werden ausgeblendet
 function chartProducts() {
-  const P = ST.I.persons, PPC = [cssv('--s1'), cssv('--s2')];
+  const P = EI().persons, PPC = [cssv('--s1'), cssv('--s2')];
   const sk = chartScen === 'A' ? 'B' : chartScen, sim = simOf(sk);   // nur ETF hat keine Vorsorgeprodukte
   const idx = chartPerson >= 0 ? [chartPerson] : P.map((_, i) => i);
   PK.forEach(k => {
@@ -926,7 +950,7 @@ function chartIncome(c) {
     tooltip: { ...baseOpt().tooltip, formatter: ps => { const b = ps.filter(p => p.seriesType === 'bar'); return tip(ps[0].axisValue, [...tipSeries(b), tipSum(b), ...tipSeries(ps.filter(p => p.seriesType !== 'bar'))]); } },
     series: [
       ...ORDER_INCOME.flatMap(k => k === 'grv' ? [bar('Gesetzliche Rente', er.map(r => m(r, V(r, 'grvW'))), PC.grv, surf)]
-        : k === 'etf' ? [bar(chartPerson >= 0 ? 'ETF-Verkauf (Hälfte)' : 'ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf, surf)]
+        : k === 'etf' ? [bar('ETF-Verkauf', er.map(r => m(r, V(r, 'etfSale'))), PC.etf, surf)]
         : on(sim, k + 'PayW') ? [bar(PROD[k].chart, er.map(r => m(r, V(r, k + 'PayW'))), PC[k], surf)] : []),
       { name: 'Netto', type: 'line', symbol: 'circle', symbolSize: 4, data: er.map(r => m(r, V(r, 'net'))), lineStyle: { width: 2, color: ink }, itemStyle: { color: ink } },
     ],
@@ -938,7 +962,7 @@ function chartDeduct(c) {
     xAxis: { ...baseOpt().xAxis, data: er.map(c.wYear) },
     tooltip: { ...baseOpt().tooltip, formatter: ps => tip(ps[0].axisValue, [...tipSeries(ps), tipSum(ps)]) },
     series: [
-      bar('Einkommensteuer + Soli', er.map(r => m(r, V(r, 'estW'))), c.C5, surf),
+      bar('Einkommensteuer + Soli' + kLab(), er.map(r => m(r, V(r, 'estW'))), c.C5, surf),
       bar('Kapitalertragsteuer', er.map(r => m(r, V(r, 'kapTaxW'))), c.C6, surf),
       bar('Kranken- und Pflegeversicherung', er.map(r => m(r, V(r, 'kvW'))), c.CA, surf),
     ],
@@ -971,7 +995,7 @@ function renderTable(sim) {
       : POLICY_DEF[k].deduct ? [[PROD[k].tbl.refund, r => e(r, k + 'Refund')]] : [])]),
     ['Rente', r => e(r, 'grv')], ...PK.map(k => [PROD[k].tbl.pay, r => e(r, k + 'Pay')]),
     ...POLICIES.filter(k => POLICY_DEF[k].lump).map(k => [PROD[k].tbl.lump, r => e(r, 'lump')]), ['ETF-Verkauf', r => e(r, 'etfSale')],
-    ['ESt + Soli', r => e(r, 'est')], ['Kapitalertragst.', r => e(r, 'kapTax')], ['KV/PV Rente', r => e(r, 'kv')],
+    ['ESt + Soli' + kLab(), r => e(r, 'est')], ['Kapitalertragst.', r => e(r, 'kapTax')], ['KV/PV Rente', r => e(r, 'kv')],
     ['Netto/Monat', r => r.net ? eur(dv(r, V(r, 'net')) / r.wMonths) : '–'], ['ETF-Depot', r => e(r, 'etf')], ...PK.map(k => [PROD[k].tbl.cap, r => e(r, k)]),
     ['Kredit/Jahr', r => e(r, 'loanPay')], ['Restschuld', r => e(r, 'debt')], ['Nettovermögen', r => e(r, 'netWorth')],
   ];
@@ -980,8 +1004,8 @@ function renderTable(sim) {
 
 function runMC() {
   const b = $('#btn-mc'); b.disabled = true; MC = null;
-  const variants = [{ key: 'A', I: ST.I, scenario: 'A' }, { key: 'B', I: ST.I, scenario: 'B' }, ...(OPT ? [{ key: 'O', I: applyPatch(ST.I, OPT.patch), scenario: 'B' }] : [])];
-  monteCarlo(ST.I, ST.A, { runs: ST.A.mcRuns, seed: MC_SEED, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
+  const variants = [{ key: 'A', I: EI(), scenario: 'A' }, { key: 'B', I: EI(), scenario: 'B' }, ...(OPT ? [{ key: 'O', I: applyPatch(EI(), OPT.patch), scenario: 'B' }] : [])];
+  monteCarlo(EI(), ST.A, { runs: ST.A.mcRuns, seed: MC_SEED, variants }, p => { $('#mc-bar').style.width = (p * 100).toFixed(0) + '%'; }, r => { b.disabled = false; MC = r; renderMC(); });
 }
 function renderMC() {
   const r = MC, qs = [0.1, 0.25, 0.5, 0.75, 0.9];
@@ -1019,8 +1043,9 @@ function renderMC() {
 // ─── Rahmen ───
 function renderPanels() {
   syncFunds();
+  if (chartPerson >= EI().persons.length) chartPerson = -1;
   renderP0(); renderP1(); renderP2();
-  if (R) { renderKPIs(); renderFacts(); if (tab === 2) renderCharts(); }
+  if (R && R.simB.rows[0].pp.length === EI().persons.length) { renderKPIs(); renderFacts(); if (tab === 2) renderCharts(); }   // sonst veraltet (Person 2 umgeschaltet): recalc folgt
 }
 $$('.tab').forEach(b => b.onclick = () => {
   tab = +b.dataset.tab;
